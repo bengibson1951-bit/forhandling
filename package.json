@@ -1,0 +1,10 @@
+{
+  "name": "forhandling",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "dev": "node --env-file=.env dev/server.mjs",
+    "eval": "node --env-file=.env tools/eval.mjs"
+  }
+}
