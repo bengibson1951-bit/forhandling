@@ -47,10 +47,23 @@
 
       <section class="step">
         <h2><span class="step-num">3</span> Starta mötet</h2>
-        <div class="howto">
-          <div><strong>🎙️ Prata</strong>Klicka på ditt namn, säg det du vill säga, och klicka igen när du är klar.</div>
-          <div><strong>👂 Lyssna</strong>Byggmax svarar högt efter några sekunder. Texten syns också på skärmen.</div>
-          <div><strong>✋ Avbryt</strong>Klicka på ditt namn medan Byggmax pratar, så tystnar de.</div>
+        <div class="quick-choices">
+          <div>
+            <div class="qc-label">Hur vill ni svara Byggmax?</div>
+            <div class="seg" id="seg-input">
+              <button type="button" data-v="voice">🎙️ Prata</button>
+              <button type="button" data-v="text">⌨️ Skriva</button>
+            </div>
+            <p class="qc-hint" id="hint-input"></p>
+          </div>
+          <div>
+            <div class="qc-label">Hur ska Byggmax svara?</div>
+            <div class="seg" id="seg-voice">
+              <button type="button" data-v="off">💬 Bara text</button>
+              <button type="button" data-v="on">🔊 Text och röst</button>
+            </div>
+            <p class="qc-hint" id="hint-voice"></p>
+          </div>
         </div>
         <p id="setup-error" class="error" hidden></p>
         <div class="start-choices">
@@ -94,9 +107,9 @@
             </label>
             <label class="row">Byggmax röst
               <select id="opt-voice">
+                <option value="off">Ingen röst, bara text</option>
                 <option value="replicate">AI-röst (bäst)</option>
                 <option value="browser">Datorns röst</option>
-                <option value="off">Ingen röst, bara text</option>
               </select>
             </label>
             <label class="check"><input type="checkbox" id="opt-fast"> Noggrannare taligenkänning (cirka 3 sekunder långsammare)</label>
@@ -198,14 +211,14 @@
         </div>
       </div>
       <div class="ptt-row" id="ptt-row"></div>
-      <details class="type-instead">
-        <summary>Hellre skriva?</summary>
-        <form class="text-row" id="text-form">
-          <select id="text-who" aria-label="Vem skriver"></select>
-          <input id="text-input" type="text" placeholder="Skriv det du vill säga till Byggmax…" autocomplete="off">
-          <button class="btn primary" type="submit">Skicka</button>
+      <div id="write-box" class="write-box" hidden>
+        <div id="write-who" class="write-who" role="radiogroup" aria-label="Vem skriver?"></div>
+        <form class="write-row" id="text-form">
+          <textarea id="text-input" rows="2" placeholder="Skriv det du vill säga till Byggmax… (Enter skickar)" autocomplete="off"></textarea>
+          <button class="btn primary big" type="submit">Skicka</button>
         </form>
-      </details>
+      </div>
+      <button id="btn-input-mode" class="link-btn" type="button"></button>
     </footer>
     <div id="pause-overlay" class="overlay" hidden><div class="pass-card"><h2>Pausat</h2><p class="lead">Klockan står still.</p><button id="btn-resume" class="btn primary big wide">Fortsätt mötet</button></div></div>
   </section>

@@ -45,6 +45,7 @@ async function checkPass(p) {
 
 async function boot() {
   settings = { ...defaultSettings(), ...(store.settings || {}) };
+  if (settings.v !== 2) { settings.voice = 'off'; settings.v = 2; store.settings = settings; } // text-only became the default
   brief = store.brief || defaultBrief();
   const p = store.pass;
   if (p) {
@@ -72,7 +73,7 @@ function routeAfterPass() {
 function defaultSettings() {
   return {
     level: DEFAULT_LEVEL, present: ROLES.map((r) => r.key), modifiers: {}, length: 45, onePersona: false,
-    pttMode: 'toggle', voice: 'replicate', fast: true, panels: true, trainingWheels: false, levelValues: {},
+    pttMode: 'toggle', voice: 'off', inputMode: 'voice', fast: true, panels: true, trainingWheels: false, levelValues: {}, v: 2,
   };
 }
 
@@ -138,6 +139,14 @@ function renderSetup() {
     c.addEventListener('click', (e) => { e.preventDefault(); settings.modifiers[k] = !on; saveSettings(); renderSetup(); });
     ml.append(c);
   }
+  for (const b of $('seg-input').children) b.classList.toggle('on', b.dataset.v === settings.inputMode);
+  for (const b of $('seg-voice').children) b.classList.toggle('on', b.dataset.v === (settings.voice === 'off' ? 'off' : 'on'));
+  $('hint-input').textContent = settings.inputMode === 'text'
+    ? 'Ni skriver era repliker i en textruta och trycker Enter.'
+    : 'Klicka på ditt namn, säg det du vill säga och klicka igen när du är klar.';
+  $('hint-voice').textContent = settings.voice === 'off'
+    ? 'Byggmax svar visas som text på skärmen.'
+    : 'Byggmax svar visas som text och läses upp. Använd hörlurar om ni sitter i Teams.';
   $('opt-length').value = String(settings.length);
   $('opt-personas').value = settings.onePersona ? '1' : '2';
   $('opt-ptt').value = settings.pttMode;
@@ -151,6 +160,12 @@ function renderSetup() {
 }
 
 function saveSettings() { store.settings = settings; }
+$('seg-input').addEventListener('click', (e) => { const v = e.target.closest('button')?.dataset.v; if (!v) return; settings.inputMode = v; saveSettings(); renderSetup(); });
+$('seg-voice').addEventListener('click', (e) => {
+  const v = e.target.closest('button')?.dataset.v; if (!v) return;
+  settings.voice = v === 'off' ? 'off' : (config.replicate ? 'replicate' : 'browser');
+  saveSettings(); renderSetup();
+});
 
 for (const [id, key, conv] of [
   ['opt-length', 'length', Number], ['opt-personas', 'onePersona', (v) => v === '1'], ['opt-ptt', 'pttMode', String],
@@ -294,6 +309,7 @@ async function startSession(opts = {}) {
 
 function baseVoiceMode() {
   if (isHost) return settings.voice;
+  if ((session?.settings?.voice || 'off') === 'off') return 'off';
   return config.replicate ? 'replicate' : 'browser';
 }
 
@@ -307,6 +323,7 @@ function enterPlay() {
     onFirstAudio: () => { if (lastReleaseAt) { session.latencies.push(Date.now() - lastReleaseAt); lastReleaseAt = 0; autosave(); } },
   });
   voiceIn = new VoiceIn({ onInterim: (t) => { if (recording) $('draft-text').value = t; }, record: config.replicate });
+  inputMode = settings.inputMode || 'voice';
   renderPlayHeader();
   setPanels(settings.panels);
   $('coach').hidden = true;
@@ -338,7 +355,7 @@ function renderPlayHeader() {
   $('invite').hidden = !shared;
   $('invite-code').textContent = shared ? `Rumskod ${session.room}` : '';
   $('btn-copy-link').hidden = !shared;
-  $('btn-sound').hidden = !shared;
+  $('btn-sound').hidden = !shared || session.settings.voice === 'off';
   $('btn-sound').textContent = settings.soundOff ? '🔇 Ljud av' : '🔊 Ljud på';
   $('btn-end').hidden = shared && !isHost;
   $('btn-pause').hidden = shared && !isHost;
@@ -525,7 +542,6 @@ function guestEnded(s) {
 
 function renderPtt() {
   const row = $('ptt-row'); row.innerHTML = '';
-  const who = $('text-who'); who.innerHTML = '';
   ROLES.forEach((r, i) => {
     if (!session.settings.present.includes(r.key)) return;
     const mine = !shared || r.key === myRole;
@@ -546,12 +562,44 @@ function renderPtt() {
       b.addEventListener('click', () => (recording?.role === r.key ? pttUp(r.key) : pttDown(r.key)));
     }
     row.append(b);
-    who.append(h('option', { value: r.key }, r.name));
   });
-  $('text-who').hidden = shared;
+  renderWriteBox();
 }
 
 function pttButtons() { return [...document.querySelectorAll('.ptt')]; }
+
+// Speak or write: the writing box shows who is writing; in shared meetings it is always you.
+let writer = null;
+let inputMode = 'voice';
+function renderWriteBox() {
+  if (!session) return;
+  const present = ROLES.filter((r) => session.settings.present.includes(r.key));
+  if (shared) writer = myRole;
+  else if (!present.some((r) => r.key === writer)) writer = present[0]?.key || null;
+  const box = $('write-who'); box.innerHTML = '';
+  if (shared) box.append(h('span', { class: 'lbl' }, `Du skriver som ${roleByKey(myRole)?.name}`));
+  else {
+    box.append(h('span', { class: 'lbl' }, 'Vem skriver?'));
+    present.forEach((r) => {
+      const b = h('button', { type: 'button', class: writer === r.key ? 'on' : '', style: `--c: var(--${r.key})`, role: 'radio', 'aria-checked': String(writer === r.key) }, avatar(r.name[0], `var(--${r.key})`), r.name);
+      b.addEventListener('click', () => { writer = r.key; renderWriteBox(); $('text-input').focus(); });
+      box.append(b);
+    });
+  }
+  const writing = inputMode === 'text';
+  $('write-box').hidden = !writing;
+  $('ptt-row').hidden = writing;
+  $('btn-input-mode').textContent = writing ? '🎙️ Prata i stället' : '⌨️ Skriv i stället';
+}
+$('btn-input-mode').addEventListener('click', () => {
+  inputMode = inputMode === 'text' ? 'voice' : 'text';
+  if (recording) discardDraft();
+  renderWriteBox(); refreshStatus();
+  if (inputMode === 'text') $('text-input').focus();
+});
+$('text-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('text-form').requestSubmit(); }
+});
 
 async function pttDown(role) {
   if (paused || session.endedAt || (shared && !isHost && snap.paused)) return;
@@ -664,7 +712,8 @@ $('text-form').addEventListener('submit', (e) => {
   voiceOut.stop();
   if (turnBusy) mutedTurn = turnId;
   if (shared) room?.send('interrupt', { turn: isHost ? turnId : currentRemoteTurn });
-  sendTeam(shared ? myRole : $('text-who').value, text, Date.now());
+  sendTeam(shared ? myRole : writer, text, Date.now());
+  $('text-input').focus();
 });
 
 // Keyboard: 1–4 push-to-talk, Esc discards.
@@ -676,7 +725,7 @@ const keyRole = (e) => {
 document.addEventListener('keydown', (e) => {
   if ($('screen-play').hidden) return;
   if (e.key === 'Escape') { discardDraft(); return; }
-  if (e.target.matches('input, textarea, select')) return;
+  if (e.target.matches('input, textarea, select') || inputMode === 'text') return;
   const role = keyRole(e);
   if (!role || !session.settings.present.includes(role) || e.repeat) return;
   e.preventDefault();
@@ -729,7 +778,7 @@ async function runTurn() {
     if (mutedTurn === myTurn || turnId !== myTurn) return;
     if (room && isHost) {
       const seq = ++saySeq;
-      const p = config.replicate ? post('fh-tts', { text: s, persona, tone }).then((r) => r.url).catch(() => null) : Promise.resolve(null);
+      const p = config.replicate && session.settings.voice !== 'off' ? post('fh-tts', { text: s, persona, tone }).then((r) => r.url).catch(() => null) : Promise.resolve(null);
       ttsCache.set(persona + s, p);
       setTimeout(() => ttsCache.delete(persona + s), 60000);
       room.send('say', { seq, text: s, persona, turn: myTurn });
@@ -808,6 +857,7 @@ function refreshStatus() {
   }
   if (turnBusy || (shared && !isHost && remoteBusy)) return set('think', 'Byggmax tänker…');
   if (session.state.walkout) return set('rec', 'Byggmax har lämnat mötet. Klicka på "Avsluta mötet" för feedback.');
+  if (inputMode === 'text') return set('idle', shared ? 'Er tur. Skriv ditt svar och tryck Enter.' : 'Er tur. Välj vem som skriver, skriv och tryck Enter.');
   return set('idle', shared ? 'Er tur. Klicka på din knapp (eller mellanslag) och prata.' : 'Er tur. Klicka på ditt namn och börja prata.');
 }
 
