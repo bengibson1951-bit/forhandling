@@ -30,6 +30,11 @@ async function readJson(req) {
 export async function handleConfig(req, env) {
   const g = gate(req, env); if (g) return g;
   const body = req.method === 'POST' ? await readJson(req) : {};
+  // Free-tier projects pause after 7 days without database activity; a tiny REST
+  // call on each app start counts as activity. Fire-and-forget.
+  if (env.SUPABASE_URL && env.SUPABASE_ANON_KEY) {
+    fetch(`${env.SUPABASE_URL}/rest/v1/`, { headers: { apikey: env.SUPABASE_ANON_KEY } }).catch(() => {});
+  }
   const out = {
     replicate: Boolean(env.REPLICATE_API_TOKEN),
     personas: PERSONAS.map(({ key, tag, name, role, voice }) => ({ key, tag, name, role, voice })),
