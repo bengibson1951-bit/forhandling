@@ -11,6 +11,7 @@ import { LEVELS, MODIFIERS, DEFAULT_LEVEL, effectiveLevel } from '../supabase/fu
 import { PERSONAS } from '../supabase/functions/_shared/personas.js';
 import { defaultBrief } from '../supabase/functions/_shared/brief.js';
 import { TECHNIQUES } from '../supabase/functions/_shared/debrief.js';
+import { Room, makeRoomCode, normalizeRoomCode, roomLink } from './room.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -47,7 +48,7 @@ async function boot() {
   brief = store.brief || defaultBrief();
   const p = store.pass;
   if (p) {
-    try { await checkPass(p); return showSetup(); } catch (e) { if (!(e instanceof ApiError && e.status === 401)) { $('pass-error').textContent = e.message; $('pass-error').hidden = false; } }
+    try { await checkPass(p); return routeAfterPass(); } catch (e) { if (!(e instanceof ApiError && e.status === 401)) { $('pass-error').textContent = e.message; $('pass-error').hidden = false; } }
   }
   show('pass');
   $('pass-input').focus();
@@ -56,10 +57,16 @@ async function boot() {
 $('pass-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   $('pass-error').hidden = true;
-  try { await checkPass($('pass-input').value.trim()); showSetup(); } catch (e) {
+  try { await checkPass($('pass-input').value.trim()); routeAfterPass(); } catch (e) {
     $('pass-error').textContent = e.message; $('pass-error').hidden = false;
   }
 });
+
+function routeAfterPass() {
+  const code = normalizeRoomCode(new URL(location.href).searchParams.get('rum'));
+  if (code) return enterRoom(code);
+  showSetup();
+}
 
 // ---------- Setup ----------
 function defaultSettings() {
@@ -184,11 +191,48 @@ function renderBriefEditor() {
   box.append(table, h('p', {}, reset));
 }
 
-$('btn-start').addEventListener('click', () => {
-  if (!settings.present.length) { $('setup-error').textContent = 'Välj minst en person som är med.'; $('setup-error').hidden = false; return; }
+function presentOk() {
+  if (!settings.present.length) { $('setup-error').textContent = 'Välj minst en person som är med.'; $('setup-error').hidden = false; return false; }
   $('setup-error').hidden = true;
-  startSession();
+  return true;
+}
+$('btn-start').addEventListener('click', () => { if (presentOk()) startSession(); });
+$('btn-start-shared').addEventListener('click', () => {
+  if (!presentOk()) return;
+  showWho({
+    title: 'Vem är du?',
+    sub: 'Du startar mötet. Sedan får du en länk att skicka till de andra i Teams-chatten.',
+    roles: settings.present,
+    onPick: (role) => startSession({ shared: true, role }),
+    onBack: showSetup,
+  });
 });
+
+// ---------- Who are you? ----------
+let whoBack = null;
+function showWho({ title, sub, roles, onPick, onBack }) {
+  $('who-title').textContent = title;
+  $('who-sub').textContent = sub || '';
+  $('who-error').hidden = true;
+  whoBack = onBack || null;
+  $('btn-who-back').hidden = !onBack;
+  const list = $('who-list'); list.innerHTML = '';
+  for (const r of ROLES.filter((x) => !roles || roles.includes(x.key))) {
+    const c = h('button', { class: 'person sel', type: 'button', style: `--c: var(--${r.key})` },
+      avatar(r.name[0], `var(--${r.key})`), h('span', {}, h('strong', {}, r.name), h('span', { class: 'role' }, r.area)));
+    c.addEventListener('click', async () => {
+      for (const b of list.querySelectorAll('button')) b.disabled = true;
+      try { await onPick(r.key); } catch (e) {
+        show('who');
+        $('who-error').textContent = e.message; $('who-error').hidden = false;
+        for (const b of list.querySelectorAll('button')) b.disabled = false;
+      }
+    });
+    list.append(c);
+  }
+  show('who');
+}
+$('btn-who-back').addEventListener('click', () => whoBack?.());
 
 // ---------- Role-play ----------
 let voiceOut = null;
@@ -203,35 +247,75 @@ let timerHandle = null;
 let paused = null;         // timestamp when paused
 let lastReleaseAt = 0;
 
-const roleByKey = (k) => ROLES.find((r) => r.key === k);
-const personas = () => (settings.onePersona ? [PERSONAS[0]] : PERSONAS);
+// Shared meeting state
+let room = null;
+let shared = false;        // meeting spans several laptops
+let isHost = true;         // this laptop runs Byggmax
+let myRole = null;         // which team member this laptop is (shared only)
+let online = [];           // presence: [{id, role, host}]
+let remoteRec = null;      // role currently talking on another laptop
+let remoteBusy = false;    // guest: host is waiting for Byggmax
+let snap = { at: 0, remainingMs: 0, paused: false };
+let liveEl = null;         // guest: streaming Byggmax bubble
+let currentRemoteTurn = null;
+let saySeq = 0;
+const ttsCache = new Map();
+let helloTimer = null;
+let snapshotTimer = null;
+const tabId = (crypto.randomUUID?.() || String(Math.random())).slice(0, 12);
 
-function startSession() {
+const roleByKey = (k) => ROLES.find((r) => r.key === k);
+const personas = () => ((session?.settings || settings).onePersona ? [PERSONAS[0]] : PERSONAS);
+
+async function startSession(opts = {}) {
   session = {
     id: `s${Date.now()}`, startedAt: Date.now(), endedAt: null, pausedMs: 0,
     settings: structuredClone(settings), brief: structuredClone(brief),
     transcript: [], state: initialState(), phaseLog: [{ phase: 'inledning', t: Date.now() }], latencies: [], debrief: null,
   };
+  shared = Boolean(opts.shared);
+  isHost = true;
+  myRole = opts.role || null;
+  snap = { at: 0, remainingMs: 0, paused: false };
+  if (shared) {
+    session.room = makeRoomCode();
+    session.isHost = true;
+    session.hostRole = myRole;
+    sessionStorage.setItem(`fh-host-${session.room}`, '1');
+    history.replaceState(null, '', roomLink(session.room));
+  } else if (location.search) {
+    history.replaceState(null, '', location.pathname);
+  }
+  enterPlay();
+  if (shared) {
+    try { await connectRoom(); } catch (e) { addSystem(e.message); }
+  }
+}
+
+function baseVoiceMode() {
+  if (isHost) return settings.voice;
+  return config.replicate ? 'replicate' : 'browser';
+}
+
+function enterPlay() {
+  voiceOut?.stop();
   voiceOut = new VoiceOut({
-    mode: settings.voice,
-    tts: async (text, persona) => (await post('fh-tts', { text, persona })).url,
+    mode: shared && settings.soundOff ? 'off' : baseVoiceMode(),
+    tts: async (text, persona) => (await (ttsCache.get(persona + text) || post('fh-tts', { text, persona }).then((r) => r.url))),
     personas: PERSONAS,
     onSpeaking: (p) => { speakingPersona = p; refreshStatus(); },
     onFirstAudio: () => { if (lastReleaseAt) { session.latencies.push(Date.now() - lastReleaseAt); lastReleaseAt = 0; autosave(); } },
   });
   voiceIn = new VoiceIn({ onInterim: (t) => { if (recording) $('draft-text').value = t; }, record: config.replicate });
-  const lvl = effectiveLevel(settings);
-  $('play-level').textContent = `Nivå ${lvl.level}: ${lvl.name}`;
-  $('play-mods').textContent = Object.entries(settings.modifiers).filter(([, v]) => v).map(([k]) => MODIFIERS[k].name).join(' · ');
+  renderPlayHeader();
   setPanels(settings.panels);
-  $('transcript').innerHTML = '';
   $('coach').hidden = true;
   hideDraft();
+  renderTranscript();
   renderPtt();
   renderPanels();
+  renderPeople();
   speakingPersona = null;
-  addSystem(`Mötet har börjat. ${personas().map((p) => `${p.name} (${p.tag})`).join(' och ')} från Byggmax är på plats. Hälsa och börja när ni är redo.`);
-  if (!voiceInSupported.live && !voiceInSupported.record) addSystem('Den här webbläsaren stöder inte taligenkänning. Använd Chrome, eller skriv.');
   show('play');
   paused = null;
   clearInterval(timerHandle);
@@ -247,14 +331,213 @@ function setPanels(on) {
 }
 $('btn-panels').addEventListener('click', () => setPanels($('play-grid').classList.contains('nopanels')));
 
+function renderPlayHeader() {
+  const lvl = effectiveLevel(session.settings);
+  $('play-level').textContent = `Nivå ${lvl.level}: ${lvl.name}`;
+  $('play-mods').textContent = Object.entries(session.settings.modifiers || {}).filter(([, v]) => v).map(([k]) => MODIFIERS[k].name).join(' · ');
+  $('invite').hidden = !shared;
+  $('invite-code').textContent = shared ? `Rumskod ${session.room}` : '';
+  $('btn-copy-link').hidden = !shared;
+  $('btn-sound').hidden = !shared;
+  $('btn-sound').textContent = settings.soundOff ? '🔇 Ljud av' : '🔊 Ljud på';
+  $('btn-end').hidden = shared && !isHost;
+  $('btn-pause').hidden = shared && !isHost;
+  $('btn-leave').hidden = !(shared && !isHost);
+  $('people-box').hidden = !shared;
+}
+
+function renderTranscript() {
+  $('transcript').innerHTML = '';
+  liveEl = null;
+  addSystem(`Mötet har börjat. ${personas().map((p) => `${p.name} (${p.tag})`).join(' och ')} från Byggmax är på plats. Hälsa och börja när ni är redo.`);
+  if (shared) addSystem(isHost ? 'Skicka länken till de andra i Teams-chatten (knappen "Kopiera länk" uppe till höger). Använd hörlurar.' : `Du är med som ${roleByKey(myRole)?.name}. Din knapp är den som lyser. Använd hörlurar.`);
+  if (!voiceInSupported.live && !voiceInSupported.record) addSystem('Den här webbläsaren stöder inte taligenkänning. Använd Chrome, eller skriv.');
+  for (const l of session.transcript) {
+    if (l.speaker === 'byggmax') addMsg('byggmax', l.persona, l.text);
+    else addMsg('team', l.name, l.text, `var(--${l.speaker})`);
+  }
+}
+
+$('btn-copy-link').addEventListener('click', async () => {
+  const link = roomLink(session.room);
+  try { await navigator.clipboard.writeText(link); $('btn-copy-link').textContent = 'Kopierad!'; }
+  catch { prompt('Kopiera länken:', link); }
+  setTimeout(() => { $('btn-copy-link').textContent = 'Kopiera länk'; }, 2000);
+});
+$('btn-sound').addEventListener('click', () => {
+  settings.soundOff = !settings.soundOff; saveSettings();
+  if (settings.soundOff) voiceOut.stop();
+  voiceOut.mode = settings.soundOff ? 'off' : baseVoiceMode();
+  renderPlayHeader();
+});
+$('btn-leave').addEventListener('click', async () => {
+  if (!confirm('Lämna mötet? Du kan gå med igen via länken.')) return;
+  await leaveRoom();
+  voiceOut?.stop();
+  clearInterval(timerHandle);
+  history.replaceState(null, '', location.pathname);
+  shared = false; isHost = true; myRole = null; session = null;
+  showSetup();
+});
+
+// ---------- Shared meetings ----------
+async function enterRoom(code) {
+  // Only the browser tab that started the meeting resumes as host (survives reloads, not new tabs).
+  const mine = sessionStorage.getItem(`fh-host-${code}`) && store.sessions().find((s) => s.room === code && s.isHost && !s.endedAt);
+  if (mine) {
+    session = mine; shared = true; isHost = true; myRole = mine.hostRole;
+    enterPlay();
+    try { await connectRoom(); } catch (e) { addSystem(e.message); }
+    return;
+  }
+  const join = async (role) => {
+    store.setRoomRole(code, role);
+    shared = true; isHost = false; myRole = role;
+    snap = { at: 0, remainingMs: 0, paused: false };
+    session = { id: `g${code}`, room: code, isHost: false, startedAt: Date.now(), endedAt: null, pausedMs: 0,
+      settings: structuredClone(settings), brief: structuredClone(brief), transcript: [], state: initialState(), phaseLog: [], latencies: [], debrief: null };
+    enterPlay();
+    await connectRoom();
+  };
+  const remembered = store.roomRole(code);
+  if (remembered) { try { await join(remembered); return; } catch (e) { console.warn(e); } }
+  showWho({ title: `Gå med i mötet ${code}`, sub: 'Vem är du? Klicka på ditt namn.', onPick: join, onBack: () => { history.replaceState(null, '', location.pathname); showSetup(); } });
+}
+
+async function connectRoom() {
+  await leaveRoom();
+  online = [];
+  room = new Room(session.room, {
+    me: { id: tabId, role: myRole, host: isHost },
+    onMessage: onRoomMessage,
+    onPresence: (people) => { online = people; renderPeople(); renderPtt(); refreshStatus(); if (isHost) scheduleSnapshot(); },
+  });
+  await room.join();
+  if (isHost) broadcastSnapshot();
+  else {
+    room.send('hello');
+    clearInterval(helloTimer);
+    helloTimer = setInterval(() => { if (!snap.at) room?.send('hello'); else clearInterval(helloTimer); }, 3000);
+  }
+  refreshStatus();
+}
+
+async function leaveRoom() {
+  clearInterval(helloTimer);
+  if (room) { const r = room; room = null; await r.leave(); }
+}
+
+function renderPeople() {
+  if (!session) return;
+  const ul = $('people-online'); ul.innerHTML = '';
+  for (const key of session.settings.present || ROLES.map((r) => r.key)) {
+    const p = online.find((x) => x.role === key);
+    const r = roleByKey(key);
+    if (!r) continue;
+    ul.append(h('li', { class: p ? '' : 'off' }, `${r.name}${key === myRole ? ' (du)' : ''}${p ? '' : ' – inte ansluten'}`));
+  }
+}
+
+const hostOnline = () => online.some((p) => p.host);
+
+function remainingMs() {
+  const now = paused || Date.now();
+  return session.settings.length * 60000 - (now - session.startedAt - session.pausedMs);
+}
+
+function scheduleSnapshot() {
+  clearTimeout(snapshotTimer);
+  snapshotTimer = setTimeout(broadcastSnapshot, 80);
+}
+
+function broadcastSnapshot() {
+  if (!room || !isHost || !session) return;
+  room.send('snapshot', { session, busy: turnBusy, remainingMs: remainingMs(), paused: Boolean(paused) });
+}
+
+function onRoomMessage(msg) {
+  switch (msg.type) {
+    case 'hello': if (isHost) broadcastSnapshot(); break;
+    case 'utterance':
+      if (isHost && msg.text && session.settings.present.includes(msg.role) && !session.endedAt) {
+        voiceOut.stop();
+        if (turnBusy) mutedTurn = turnId;
+        sendTeam(msg.role, String(msg.text).slice(0, 2000), Date.now());
+      }
+      break;
+    case 'recording':
+      remoteRec = msg.on ? msg.role : (remoteRec === msg.role ? null : remoteRec);
+      renderPtt(); refreshStatus();
+      break;
+    case 'interrupt':
+      voiceOut.stop();
+      if (isHost && turnBusy) mutedTurn = turnId;
+      if (!isHost && msg.turn != null) mutedTurn = msg.turn;
+      break;
+    case 'snapshot': if (!isHost) applySnapshot(msg); break;
+    case 'live':
+      if (!isHost && session && !session.endedAt) {
+        if (!liveEl || liveEl.dataset.turn !== String(msg.turn)) { liveEl = addMsg('byggmax', msg.persona, '', null, true); liveEl.dataset.turn = String(msg.turn); }
+        setWho(liveEl, msg.persona); setText(liveEl, msg.text);
+        remoteBusy = true; currentRemoteTurn = msg.turn; refreshStatus();
+      }
+      break;
+    case 'say':
+      if (!isHost && msg.turn !== mutedTurn) { currentRemoteTurn = msg.turn; voiceOut.enqueueRemote(msg.seq, msg.text, msg.persona); }
+      break;
+    case 'sayurl': if (!isHost) voiceOut.resolveRemote(msg.seq, msg.url); break;
+    case 'ended': if (!isHost) guestEnded(msg.session); break;
+    default: break;
+  }
+}
+
+function applySnapshot(msg) {
+  const s = msg.session;
+  if (!s) return;
+  session = { ...s, id: `g${s.room}`, isHost: false };
+  remoteBusy = Boolean(msg.busy);
+  snap = { at: Date.now(), remainingMs: msg.remainingMs, paused: Boolean(msg.paused) };
+  $('pause-overlay').hidden = !snap.paused;
+  if (s.endedAt) return guestEnded(s);
+  if ($('screen-play').hidden) show('play');
+  renderPlayHeader();
+  renderTranscript();
+  renderPtt();
+  renderPanels();
+  renderPeople();
+  const last = [...(s.transcript || [])].reverse().find((l) => l.speaker === 'byggmax');
+  if (last?.coach && s.settings.trainingWheels) { $('coach').textContent = `💡 ${last.coach}`; $('coach').hidden = false; } else $('coach').hidden = true;
+  tickTimer();
+  refreshStatus();
+  store.saveSession(session);
+}
+
+function guestEnded(s) {
+  session = { ...s, id: `g${s.room}`, isHost: false };
+  voiceOut?.stop();
+  if (recording) discardDraft();
+  clearInterval(timerHandle);
+  store.saveSession(session);
+  show('debrief');
+  if (session.debrief) renderDebrief();
+  else { $('debrief-body').innerHTML = ''; $('debrief-body').append(h('p', { class: 'lead' }, h('span', { class: 'spinner' }), ' Mötet är slut. Coachen läser igenom mötet… (cirka en halv minut)')); }
+}
+
 function renderPtt() {
   const row = $('ptt-row'); row.innerHTML = '';
   const who = $('text-who'); who.innerHTML = '';
   ROLES.forEach((r, i) => {
     if (!session.settings.present.includes(r.key)) return;
-    const b = h('button', { class: 'ptt', type: 'button', style: `--c: var(--${r.key})`, 'data-role': r.key, title: r.area },
+    const mine = !shared || r.key === myRole;
+    const isOnline = online.some((p) => p.role === r.key);
+    let sub = settings.pttMode === 'hold' ? `Håll ned · tangent ${i + 1}` : `Klicka och prata · tangent ${i + 1}`;
+    if (shared && mine) sub = settings.pttMode === 'hold' ? 'Din knapp · håll ned mellanslag' : 'Din knapp · eller mellanslag';
+    if (shared && !mine) sub = remoteRec === r.key ? 'Pratar nu…' : isOnline ? 'Med i mötet' : 'Inte ansluten';
+    const cls = `ptt${shared ? (mine ? ' mine' : ' remote') : ''}${(remoteRec === r.key && !mine) || recording?.role === r.key ? ' rec' : ''}`;
+    const b = h('button', { class: cls, type: 'button', style: `--c: var(--${r.key})`, 'data-role': r.key, title: r.area, disabled: (shared && !mine) || (recording && recording.role !== r.key) },
       micIcon(),
-      h('span', {}, h('span', { class: 'name' }, r.name), h('span', { class: 'sub' }, settings.pttMode === 'hold' ? `Håll ned · tangent ${i + 1}` : `Klicka och prata · tangent ${i + 1}`)));
+      h('span', {}, h('span', { class: 'name' }, r.name), h('span', { class: 'sub' }, sub)));
+    if (!mine) { row.append(b); return; }
     if (settings.pttMode === 'hold') {
       b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); pttDown(r.key); });
       b.addEventListener('pointerup', () => pttUp(r.key));
@@ -265,25 +548,26 @@ function renderPtt() {
     row.append(b);
     who.append(h('option', { value: r.key }, r.name));
   });
+  $('text-who').hidden = shared;
 }
 
 function pttButtons() { return [...document.querySelectorAll('.ptt')]; }
 
 async function pttDown(role) {
-  if (paused || session.endedAt) return;
+  if (paused || session.endedAt || (shared && !isHost && snap.paused)) return;
   if (recording) return;
   voiceOut.stop();
   if (turnBusy) mutedTurn = turnId;
   if (draft) sendDraft();
   recording = { role };
-  for (const b of pttButtons()) {
-    b.classList.toggle('rec', b.dataset.role === role);
-    b.disabled = b.dataset.role !== role;
-  }
+  renderPtt();
+  if (shared) { room?.send('interrupt', { turn: isHost ? turnId : currentRemoteTurn }); room?.send('recording', { role, on: true }); }
+  if (shared && !isHost) mutedTurn = currentRemoteTurn;
   showDraft(role, '', 'Lyssnar…');
   refreshStatus();
   try { await voiceIn.start(); } catch (e) {
     recording = null; resetPtt(); hideDraft(); addSystem(e.message); refreshStatus();
+    if (shared) room?.send('recording', { role, on: false });
   }
 }
 
@@ -291,6 +575,7 @@ async function pttUp(role) {
   if (!recording || recording.role !== role) return;
   recording = null;
   resetPtt();
+  if (shared) room?.send('recording', { role, on: false });
   const releasedAt = Date.now();
   $('draft-status').textContent = 'Avslutar…';
   refreshStatus();
@@ -315,7 +600,7 @@ async function pttUp(role) {
   scheduleAutoSend();
 }
 
-function resetPtt() { for (const b of pttButtons()) { b.classList.remove('rec'); b.disabled = false; } }
+function resetPtt() { renderPtt(); }
 
 function showDraft(role, text, status) {
   clearTimeout(draft?.autoTimer);
@@ -359,7 +644,7 @@ $('btn-send').addEventListener('click', () => sendDraft());
 $('btn-discard').addEventListener('click', () => discardDraft());
 
 function discardDraft() {
-  if (recording) { voiceIn.cancel(); recording = null; resetPtt(); }
+  if (recording) { const r = recording.role; voiceIn.cancel(); recording = null; resetPtt(); if (shared) room?.send('recording', { role: r, on: false }); }
   hideDraft();
 }
 
@@ -378,12 +663,14 @@ $('text-form').addEventListener('submit', (e) => {
   $('text-input').value = '';
   voiceOut.stop();
   if (turnBusy) mutedTurn = turnId;
-  sendTeam($('text-who').value, text, Date.now());
+  if (shared) room?.send('interrupt', { turn: isHost ? turnId : currentRemoteTurn });
+  sendTeam(shared ? myRole : $('text-who').value, text, Date.now());
 });
 
 // Keyboard: 1–4 push-to-talk, Esc discards.
 const keyRole = (e) => {
   const idx = ['1', '2', '3', '4'].indexOf(e.key);
+  if (shared) return (e.code === 'Space' || (idx >= 0 && ROLES[idx].key === myRole)) ? myRole : null;
   return idx >= 0 ? ROLES[idx].key : null;
 };
 document.addEventListener('keydown', (e) => {
@@ -405,6 +692,12 @@ document.addEventListener('keyup', (e) => {
 
 function sendTeam(role, text, releasedAt) {
   const r = roleByKey(role);
+  if (shared && !isHost) {
+    room?.send('utterance', { role, text, releasedAt });
+    addMsg('team', r.name, text, `var(--${role})`, true);
+    remoteBusy = true; refreshStatus();
+    return;
+  }
   session.transcript.push({ speaker: role, name: r.name, text, t: Date.now() });
   addMsg('team', r.name, text, `var(--${role})`);
   lastReleaseAt = releasedAt || Date.now();
@@ -424,13 +717,32 @@ async function runTurn() {
   let enqueued = false;
   const el = addMsg('byggmax', persona, '', null, true);
   refreshStatus();
-  const speak = (s) => { if (mutedTurn !== myTurn && turnId === myTurn) { voiceOut.enqueue(s, persona); enqueued = true; } };
+  broadcastSnapshot();
+  let lastLive = 0;
+  const shareLive = () => {
+    if (!room || !isHost || Date.now() - lastLive < 200) return;
+    lastLive = Date.now();
+    room.send('live', { text: shown.trim(), persona, turn: myTurn });
+  };
+  const speak = (s) => {
+    if (mutedTurn === myTurn || turnId !== myTurn) return;
+    if (room && isHost) {
+      const seq = ++saySeq;
+      const p = config.replicate ? post('fh-tts', { text: s, persona }).then((r) => r.url).catch(() => null) : Promise.resolve(null);
+      ttsCache.set(persona + s, p);
+      setTimeout(() => ttsCache.delete(persona + s), 60000);
+      room.send('say', { seq, text: s, persona, turn: myTurn });
+      p.then((url) => room?.send('sayurl', { seq, url }));
+    }
+    voiceOut.enqueue(s, persona); enqueued = true;
+  };
   try {
     await streamTurn({ settings: session.settings, brief: session.brief, transcript: session.transcript, state: session.state }, {
       persona: (p) => { persona = normalizePersona(p); setWho(el, persona); },
       speech: (t) => {
         shown += t; buf += t;
         setText(el, shown.trim());
+        shareLive();
         const { sentences, rest } = splitSentences(buf);
         buf = rest;
         sentences.forEach(speak);
@@ -441,7 +753,7 @@ async function runTurn() {
         buf = '';
         persona = normalizePersona(data.persona || persona);
         setWho(el, persona); setText(el, finalText); el.classList.remove('pending');
-        session.transcript.push({ speaker: 'byggmax', persona, text: finalText, t: Date.now() });
+        session.transcript.push({ speaker: 'byggmax', persona, text: finalText, t: Date.now(), coach: data.update?.coach || undefined });
         const before = session.state.phase;
         session.state = applyUpdate(session.state, data.update, session.transcript.length - 1);
         if (session.state.phase !== before) session.phaseLog.push({ phase: session.state.phase, t: Date.now() });
@@ -480,6 +792,9 @@ function refreshStatus() {
   const el = $('status');
   const set = (kind, text) => { el.className = `status ${kind}`; $('status-text').textContent = text; };
   const hold = settings.pttMode === 'hold';
+  if (shared && !isHost && !snap.at) return set('check', hostOnline() ? 'Ansluter till mötet…' : 'Väntar på den som startade mötet…');
+  if (shared && !isHost && !hostOnline()) return set('check', 'Den som startade mötet är inte ansluten just nu. Vänta en stund.');
+  if (!recording && shared && remoteRec && remoteRec !== myRole) return set('rec', `${roleByKey(remoteRec).name} pratar…`);
   if (recording) {
     const n = roleByKey(recording.role).name;
     return set('rec', hold ? `${n} pratar… släpp knappen när du är klar` : `${n} pratar… klicka på ${n} igen när du är klar`);
@@ -489,9 +804,9 @@ function refreshStatus() {
     const p = PERSONAS.find((x) => x.tag === speakingPersona);
     return set('speak', `${p ? p.name.split(' ')[0] : 'Byggmax'} från Byggmax pratar. Klicka på ditt namn för att avbryta.`);
   }
-  if (turnBusy) return set('think', 'Byggmax tänker…');
+  if (turnBusy || (shared && !isHost && remoteBusy)) return set('think', 'Byggmax tänker…');
   if (session.state.walkout) return set('rec', 'Byggmax har lämnat mötet. Klicka på "Avsluta mötet" för feedback.');
-  return set('idle', 'Er tur. Klicka på ditt namn och börja prata.');
+  return set('idle', shared ? 'Er tur. Klicka på din knapp (eller mellanslag) och prata.' : 'Er tur. Klicka på ditt namn och börja prata.');
 }
 
 function addMsg(kind, who, text, color, pending = false) {
@@ -517,6 +832,7 @@ function renderPanels() {
   PHASES.forEach((p, i) => {
     const li = h('li', { class: i < cur ? 'done' : i === cur ? 'cur' : '', 'data-n': String(i + 1), title: p.next ? `${p.name}. Gå vidare när: ${p.next.toLowerCase()}. Klicka för att byta fas.` : `${p.name}. Klicka för att byta fas.` }, p.name);
     li.addEventListener('click', () => {
+      if (shared && !isHost) return;
       if (s.phase === p.key) return;
       s.phase = p.key; session.phaseLog.push({ phase: p.key, t: Date.now() }); renderPanels(); autosave();
     });
@@ -525,7 +841,7 @@ function renderPanels() {
   const al = $('agenda-list'); al.innerHTML = '';
   for (const a of AGENDA) {
     const li = h('li', { class: s.agenda[a.key] ? 'done' : '' }, a.name);
-    li.addEventListener('click', () => { s.agenda[a.key] = !s.agenda[a.key]; renderPanels(); autosave(); });
+    li.addEventListener('click', () => { if (shared && !isHost) return; s.agenda[a.key] = !s.agenda[a.key]; renderPanels(); autosave(); });
     al.append(li);
   }
   const pr = s.proposal;
@@ -561,9 +877,9 @@ function renderPanels() {
 
 function tickTimer() {
   if (!session || session.endedAt) return;
-  const now = paused || Date.now();
-  const elapsed = now - session.startedAt - session.pausedMs;
-  const left = session.settings.length * 60000 - elapsed;
+  const left = shared && !isHost
+    ? (snap.paused ? snap.remainingMs : snap.remainingMs - (Date.now() - snap.at))
+    : remainingMs();
   const abs = Math.abs(left);
   const mm = String(Math.floor(abs / 60000)).padStart(2, '0');
   const ss = String(Math.floor((abs % 60000) / 1000)).padStart(2, '0');
@@ -579,11 +895,14 @@ $('btn-pause').addEventListener('click', () => {
   voiceOut.stop();
   if (recording) discardDraft();
   $('pause-overlay').hidden = false;
+  broadcastSnapshot();
 });
 $('btn-resume').addEventListener('click', () => {
+  if (shared && !isHost) return;
   session.pausedMs += Date.now() - paused;
   paused = null;
   $('pause-overlay').hidden = true;
+  broadcastSnapshot();
 });
 
 $('btn-end').addEventListener('click', () => {
@@ -591,7 +910,11 @@ $('btn-end').addEventListener('click', () => {
   endSession();
 });
 
-function autosave() { if (session) store.saveSession(session); }
+function autosave() {
+  if (!session) return;
+  store.saveSession(session);
+  if (shared && isHost) scheduleSnapshot();
+}
 
 async function endSession() {
   voiceOut?.stop();
@@ -600,8 +923,10 @@ async function endSession() {
   clearInterval(timerHandle);
   session.endedAt = Date.now();
   autosave();
+  if (room && isHost) room.send('ended', { session });
   show('debrief');
   await loadDebrief();
+  if (room && isHost) room.send('ended', { session });
 }
 
 // ---------- Debrief ----------
@@ -609,6 +934,7 @@ async function loadDebrief() {
   const body = $('debrief-body');
   if (session.debrief) return renderDebrief();
   body.innerHTML = '';
+  if (shared && !isHost) { body.append(h('p', { class: 'lead' }, 'Coachens feedback kommer från den som startade mötet.')); return renderDebrief(null, true); }
   if (session.transcript.filter((t) => t.speaker !== 'byggmax').length < 2) {
     renderDebrief('För kort möte för en debrief — men här är briefen och transkriptet.');
     return;
@@ -723,7 +1049,7 @@ $('btn-export').addEventListener('click', () => {
   const a = h('a', { href: URL.createObjectURL(new Blob([md], { type: 'text/markdown' })), download: `forhandling-${new Date(session.startedAt).toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md` });
   document.body.append(a); a.click(); a.remove();
 });
-$('btn-new').addEventListener('click', () => { session = null; showSetup(); });
+$('btn-new').addEventListener('click', async () => { await leaveRoom(); shared = false; isHost = true; myRole = null; if (location.search) history.replaceState(null, '', location.pathname); session = null; showSetup(); });
 
 // ---------- History ----------
 $('btn-history').addEventListener('click', () => {

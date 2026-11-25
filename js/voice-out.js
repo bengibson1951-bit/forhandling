@@ -1,7 +1,9 @@
 // Byggmax speech output: Replicate TTS per sentence (fetched in parallel, played in order),
 // with browser speechSynthesis as fallback. stop() interrupts everything.
 export class VoiceOut {
-  constructor({ mode = 'replicate', tts, personas = [], onSpeaking = () => {}, onFirstAudio = () => {} }) {
+  constructor({ mode = 'replicate', tts, personas = [], onSpeaking = () => {}, onFirstAudio = () => {}, onItem = null }) {
+    this.onItem = onItem;        // host: called with each queued sentence (to share with other laptops)
+    this.remote = new Map();     // guest: seq -> resolver for audio URLs sent by the host
     this.mode = mode;            // 'replicate' | 'browser' | 'off'
     this.tts = tts;              // async (text, persona) => url
     this.personas = personas;
@@ -34,7 +36,25 @@ export class VoiceOut {
       item.url = this.tts(text, personaTag).catch((e) => { console.warn('tts failed, browser fallback', e); return null; });
     }
     this.queue.push(item);
+    this.onItem?.(item);
     if (!this.playing) this._next();
+  }
+
+  // Guest: queue a sentence whose audio URL will arrive later from the host (or never → browser voice).
+  enqueueRemote(seq, text, personaTag) {
+    if (this.mode === 'off' || !text.trim()) return;
+    const gen = this.gen;
+    const url = new Promise((resolve) => {
+      this.remote.set(seq, resolve);
+      setTimeout(() => { if (this.remote.get(seq) === resolve) { this.remote.delete(seq); resolve(null); } }, 9000);
+    });
+    this.queue.push({ text, personaTag, gen, url: this.mode === 'replicate' ? url : null });
+    if (!this.playing) this._next();
+  }
+
+  resolveRemote(seq, url) {
+    const r = this.remote.get(seq);
+    if (r) { this.remote.delete(seq); r(url || null); }
   }
 
   stop() {

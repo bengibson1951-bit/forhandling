@@ -15,6 +15,8 @@ export const store = {
   set settings(v) { const d = load(); d.settings = v; save(d); },
   get brief() { return load().brief || null; },
   set brief(v) { const d = load(); d.brief = v; save(d); },
+  roomRole(code) { return (load().rooms || {})[code] || null; },
+  setRoomRole(code, role) { const d = load(); d.rooms = { ...(d.rooms || {}), [code]: role }; save(d); },
   sessions() { return load().sessions || []; },
   saveSession(session) {
     const d = load();

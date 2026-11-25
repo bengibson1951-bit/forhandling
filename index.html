@@ -53,7 +53,16 @@
           <div><strong>✋ Avbryt</strong>Klicka på ditt namn medan Byggmax pratar, så tystnar de.</div>
         </div>
         <p id="setup-error" class="error" hidden></p>
-        <button id="btn-start" class="btn primary huge" type="button">Starta mötet</button>
+        <div class="start-choices">
+          <div class="start-choice">
+            <button id="btn-start" class="btn primary huge" type="button">Alla vid samma dator</button>
+            <p>Ni sitter tillsammans vid en dator.</p>
+          </div>
+          <div class="start-choice">
+            <button id="btn-start-shared" class="btn primary huge alt" type="button">Alla hemifrån</button>
+            <p>Var och en på sin egen dator, samtidigt som ni pratar i Teams. Ni får en länk att skicka till de andra.</p>
+          </div>
+        </div>
       </section>
 
       <details class="more">
@@ -103,6 +112,18 @@
     </div>
   </section>
 
+  <!-- Who are you? (shared meetings) -->
+  <section id="screen-who" class="screen" hidden>
+    <div class="pass-card wide-card">
+      <h1 id="who-title">Vem är du?</h1>
+      <p class="lead" id="who-sub"></p>
+      <div id="who-list" class="people who-list"></div>
+      <p id="who-error" class="error" hidden></p>
+      <p class="hint small" id="who-hint">Använd hörlurar, så att Byggmax röst inte hörs i Teams.</p>
+      <button id="btn-who-back" class="btn ghost" type="button">Tillbaka</button>
+    </div>
+  </section>
+
   <!-- Role-play -->
   <section id="screen-play" class="screen" hidden>
     <header class="play-head">
@@ -113,15 +134,22 @@
       </div>
       <ol id="phase-list" class="stepper" aria-label="Mötets faser"></ol>
       <div class="play-tools">
+        <span id="invite" class="invite" hidden><span id="invite-code"></span><button id="btn-copy-link" class="btn small" type="button">Kopiera länk</button></span>
+        <button id="btn-sound" class="btn ghost small" type="button" hidden>🔊 Ljud på</button>
         <span id="timer" class="timer" title="Tid kvar">45:00</span>
         <button id="btn-panels" class="btn ghost small" type="button">Dölj hjälprutor</button>
         <button id="btn-pause" class="btn ghost small" type="button">Paus</button>
         <button id="btn-end" class="btn end small" type="button">Avsluta mötet</button>
+        <button id="btn-leave" class="btn end small" type="button" hidden>Lämna mötet</button>
       </div>
     </header>
 
     <div class="play-grid" id="play-grid">
       <aside class="panel left" id="panel-left">
+        <div id="people-box" hidden>
+          <h3>Med i mötet</h3>
+          <ul id="people-online" class="online-list"></ul>
+        </div>
         <h3>Att prata om</h3>
         <ul id="agenda-list" class="agenda-list"></ul>
         <p class="hint small">Bockas av när ni pratat om det. Klicka för att ändra.</p>

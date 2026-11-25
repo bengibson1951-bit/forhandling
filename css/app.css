@@ -229,3 +229,27 @@ blockquote cite { display: block; font-style: normal; font-size: .8rem; color: v
   .stepper li:not(.cur) { font-size: 0; gap: 0; padding: .35rem .3rem; }
 }
 @media (max-width: 800px) { .play-grid { grid-template-columns: 1fr; } .panel { display: none; } .howto, .more-grid { grid-template-columns: 1fr; } .play-head { grid-template-columns: 1fr auto; } .stepper { display: none; } }
+
+/* Shared meetings */
+.start-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.start-choice { background: var(--bg); border-radius: 14px; padding: 1.1rem; display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+.start-choice .btn { width: 100%; padding-left: 1rem; padding-right: 1rem; }
+.start-choice p { margin: 0; color: var(--muted); font-size: .95rem; }
+.btn.alt { background: #2f7d50; border-color: #2f7d50; }
+.btn.alt:hover { background: #3a9563; border-color: #3a9563; }
+.wide-card { width: min(720px, 100%); }
+.who-list { margin: 1.4rem 0 1rem; text-align: left; }
+.who-list .person { opacity: 1 !important; }
+.who-list .person .avatar { filter: none !important; }
+.who-list .person:hover { border-color: var(--c); background: color-mix(in srgb, var(--c) 8%, white); }
+.invite { display: inline-flex; align-items: center; gap: .5rem; background: var(--ok-soft); color: var(--ok); border-radius: 999px; padding: .2rem .3rem .2rem .9rem; font-weight: 700; font-size: .9rem; }
+.online-list { list-style: none; padding: 0; margin: 0; }
+.online-list li { display: flex; align-items: center; gap: .5rem; padding: .25rem 0; }
+.online-list li::before { content: ""; width: .6rem; height: .6rem; border-radius: 50%; background: var(--ok); }
+.online-list li.off { color: var(--muted); }
+.online-list li.off::before { background: #c9c3b8; }
+.ptt.remote { cursor: default; opacity: .55; }
+.ptt.remote.rec { opacity: 1; }
+.ptt.remote .sub { font-style: italic; }
+.ptt.mine { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 25%, transparent); }
+@media (max-width: 800px) { .start-choices { grid-template-columns: 1fr; } }
