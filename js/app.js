@@ -75,20 +75,47 @@ function showSetup() {
   show('setup');
 }
 
+// Plain-language copy for the setup screen.
+const LEVEL_COPY = {
+  1: 'Vänlig och öppen. Bra första övning.',
+  2: 'Rimlig, men vill ha valuta för pengarna.',
+  3: 'Tjatar om priset och nämner andra offerter.',
+  4: 'Använder knep och ger lite. Testar er.',
+  5: 'Mycket svår. Kan gå från mötet.',
+};
+const MODIFIER_COPY = {
+  konkurrentoffert: 'Byggmax har ett billigare skriftligt bud från en annan leverantör.',
+  beslutsfattarenSaknas: 'De i rummet kan inte bestämma. Allt "måste stämmas av".',
+  tidspanik: 'Byggmax är mest orolig för att hinna till 1 februari.',
+};
+const SVGNS = 'http://www.w3.org/2000/svg';
+function micIcon() {
+  const s = document.createElementNS(SVGNS, 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', '22'); s.setAttribute('height', '22'); s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '2.2'); s.setAttribute('stroke-linecap', 'round');
+  s.innerHTML = '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>';
+  return h('span', { class: 'mic', 'aria-hidden': 'true' }, s);
+}
+const initials = (name) => name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+const avatar = (text, color, extra = '') => h('span', { class: `avatar ${extra}`, style: color ? `--c:${color}` : null }, text);
+
 function renderSetup() {
   const ll = $('level-list'); ll.innerHTML = '';
   for (const l of LEVELS) {
     const lab = h('label', { class: `level${settings.level === l.level ? ' sel' : ''}` },
       h('input', { type: 'radio', name: 'level', value: l.level, checked: settings.level === l.level }),
-      h('span', { class: 'num' }, String(l.level)),
-      h('span', {}, h('strong', {}, l.name + (l.level === DEFAULT_LEVEL ? ' (standard)' : '')), h('span', { class: 'desc' }, l.behaviour.split('. ').slice(0, 2).join('. ').replace(/\.?$/, '.'))));
-    lab.addEventListener('click', () => { settings.level = l.level; saveSettings(); renderSetup(); });
+      h('span', { class: 'dots', 'aria-label': `Svårighet ${l.level} av 5` }, '●'.repeat(l.level) + '○'.repeat(5 - l.level)),
+      h('strong', {}, l.name),
+      h('span', { class: 'desc' }, LEVEL_COPY[l.level] || ''),
+      l.level === DEFAULT_LEVEL ? h('span', { class: 'tag' }, 'Börja här') : null);
+    lab.addEventListener('click', (e) => { e.preventDefault(); settings.level = l.level; saveSettings(); renderSetup(); });
     ll.append(lab);
   }
   const pl = $('present-list'); pl.innerHTML = '';
   for (const r of ROLES) {
     const on = settings.present.includes(r.key);
-    const c = h('label', { class: `chip${on ? ' sel' : ''}`, title: r.area }, h('input', { type: 'checkbox', checked: on }), r.name);
+    const c = h('label', { class: `person${on ? ' sel' : ''}`, style: `--c: var(--${r.key})` },
+      h('input', { type: 'checkbox', checked: on }),
+      avatar(r.name[0], `var(--${r.key})`),
+      h('span', {}, h('strong', {}, r.name), h('span', { class: 'role' }, r.area)));
     c.addEventListener('click', (e) => {
       e.preventDefault();
       settings.present = on ? settings.present.filter((k) => k !== r.key) : [...settings.present, r.key];
@@ -99,7 +126,8 @@ function renderSetup() {
   const ml = $('modifier-list'); ml.innerHTML = '';
   for (const [k, m] of Object.entries(MODIFIERS)) {
     const on = Boolean(settings.modifiers[k]);
-    const c = h('label', { class: `chip${on ? ' sel' : ''}`, title: m.text }, h('input', { type: 'checkbox', checked: on }), m.name);
+    const c = h('label', { class: `modifier${on ? ' sel' : ''}` }, h('input', { type: 'checkbox', checked: on }),
+      h('strong', {}, `${on ? '✓ ' : ''}${m.name}`), h('span', {}, MODIFIER_COPY[k] || m.text));
     c.addEventListener('click', (e) => { e.preventDefault(); settings.modifiers[k] = !on; saveSettings(); renderSetup(); });
     ml.append(c);
   }
@@ -188,7 +216,7 @@ function startSession() {
     mode: settings.voice,
     tts: async (text, persona) => (await post('fh-tts', { text, persona })).url,
     personas: PERSONAS,
-    onSpeaking: (p) => setSpeaking(p ? `${p} talar…` : ''),
+    onSpeaking: (p) => { speakingPersona = p; refreshStatus(); },
     onFirstAudio: () => { if (lastReleaseAt) { session.latencies.push(Date.now() - lastReleaseAt); lastReleaseAt = 0; autosave(); } },
   });
   voiceIn = new VoiceIn({ onInterim: (t) => { if (recording) $('draft-text').value = t; }, record: config.replicate });
@@ -201,6 +229,7 @@ function startSession() {
   hideDraft();
   renderPtt();
   renderPanels();
+  speakingPersona = null;
   addSystem(`Mötet har börjat. ${personas().map((p) => `${p.name} (${p.tag})`).join(' och ')} från Byggmax är på plats. Hälsa och börja när ni är redo.`);
   if (!voiceInSupported.live && !voiceInSupported.record) addSystem('Den här webbläsaren stöder inte taligenkänning. Använd Chrome, eller skriv.');
   show('play');
@@ -209,11 +238,12 @@ function startSession() {
   timerHandle = setInterval(tickTimer, 500);
   tickTimer();
   autosave();
+  refreshStatus();
 }
 
 function setPanels(on) {
   $('play-grid').classList.toggle('nopanels', !on);
-  $('btn-panels').textContent = on ? 'Dölj paneler' : 'Visa paneler';
+  $('btn-panels').textContent = on ? 'Dölj hjälprutor' : 'Visa hjälprutor';
 }
 $('btn-panels').addEventListener('click', () => setPanels($('play-grid').classList.contains('nopanels')));
 
@@ -222,8 +252,9 @@ function renderPtt() {
   const who = $('text-who'); who.innerHTML = '';
   ROLES.forEach((r, i) => {
     if (!session.settings.present.includes(r.key)) return;
-    const b = h('button', { class: 'ptt', type: 'button', style: `--c: var(--${r.key})`, 'data-role': r.key },
-      r.name, h('small', {}, `${i + 1} · ${settings.pttMode === 'hold' ? 'håll ned' : 'klicka'} · ${r.area}`));
+    const b = h('button', { class: 'ptt', type: 'button', style: `--c: var(--${r.key})`, 'data-role': r.key, title: r.area },
+      micIcon(),
+      h('span', {}, h('span', { class: 'name' }, r.name), h('span', { class: 'sub' }, settings.pttMode === 'hold' ? `Håll ned · tangent ${i + 1}` : `Klicka och prata · tangent ${i + 1}`)));
     if (settings.pttMode === 'hold') {
       b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); pttDown(r.key); });
       b.addEventListener('pointerup', () => pttUp(r.key));
@@ -249,9 +280,10 @@ async function pttDown(role) {
     b.classList.toggle('rec', b.dataset.role === role);
     b.disabled = b.dataset.role !== role;
   }
-  showDraft(role, '', 'Lyssnar… ' + (settings.pttMode === 'hold' ? 'släpp när du är klar' : 'klicka igen när du är klar'));
+  showDraft(role, '', 'Lyssnar…');
+  refreshStatus();
   try { await voiceIn.start(); } catch (e) {
-    recording = null; resetPtt(); hideDraft(); addSystem(e.message);
+    recording = null; resetPtt(); hideDraft(); addSystem(e.message); refreshStatus();
   }
 }
 
@@ -261,6 +293,7 @@ async function pttUp(role) {
   resetPtt();
   const releasedAt = Date.now();
   $('draft-status').textContent = 'Avslutar…';
+  refreshStatus();
   const { text, blob, mime } = await voiceIn.stop();
   $('draft-text').value = text;
   const wantStt = config.replicate && blob && blob.size > 2000 && (!settings.fast || !text);
@@ -292,8 +325,9 @@ function showDraft(role, text, status) {
   $('draft-who').style.color = `var(--${role})`;
   $('draft-text').value = text;
   $('draft-status').textContent = status || '';
+  refreshStatus();
 }
-function hideDraft() { clearTimeout(draft?.autoTimer); draft = null; $('draft').hidden = true; }
+function hideDraft() { clearTimeout(draft?.autoTimer); draft = null; $('draft').hidden = true; refreshStatus(); }
 
 const AUTO_SEND_MS = 1200;
 function scheduleAutoSend() {
@@ -389,7 +423,7 @@ async function runTurn() {
   let buf = '';
   let enqueued = false;
   const el = addMsg('byggmax', persona, '', null, true);
-  setSpeaking('Byggmax tänker…');
+  refreshStatus();
   const speak = (s) => { if (mutedTurn !== myTurn && turnId === myTurn) { voiceOut.enqueue(s, persona); enqueued = true; } };
   try {
     await streamTurn({ settings: session.settings, brief: session.brief, transcript: session.transcript, state: session.state }, {
@@ -428,7 +462,7 @@ async function runTurn() {
     retry.addEventListener('click', () => { sys.remove(); if (!turnBusy) runTurn(); });
   } finally {
     turnBusy = false;
-    if (!enqueued && !voiceOut.busy) setSpeaking('');
+    refreshStatus();
     autosave();
     if (turnAgain) runTurn();
   }
@@ -439,18 +473,40 @@ function normalizePersona(p) {
   return (list.find((x) => x.tag === p || x.key === p || x.name === p) || list[0]).tag;
 }
 
-function setSpeaking(text) { $('speaking-now').textContent = text; }
+// One clear line telling the team what is happening and what to do.
+let speakingPersona = null;
+function refreshStatus() {
+  if (!session) return;
+  const el = $('status');
+  const set = (kind, text) => { el.className = `status ${kind}`; $('status-text').textContent = text; };
+  const hold = settings.pttMode === 'hold';
+  if (recording) {
+    const n = roleByKey(recording.role).name;
+    return set('rec', hold ? `${n} pratar… släpp knappen när du är klar` : `${n} pratar… klicka på ${n} igen när du är klar`);
+  }
+  if (draft) return set('check', draft.sttPending ? 'Lyssnar igenom det du sa…' : 'Kolla texten. Den skickas automatiskt.');
+  if (speakingPersona) {
+    const p = PERSONAS.find((x) => x.tag === speakingPersona);
+    return set('speak', `${p ? p.name.split(' ')[0] : 'Byggmax'} från Byggmax pratar. Klicka på ditt namn för att avbryta.`);
+  }
+  if (turnBusy) return set('think', 'Byggmax tänker…');
+  if (session.state.walkout) return set('rec', 'Byggmax har lämnat mötet. Klicka på "Avsluta mötet" för feedback.');
+  return set('idle', 'Er tur. Klicka på ditt namn och börja prata.');
+}
 
 function addMsg(kind, who, text, color, pending = false) {
-  const el = h('div', { class: `msg ${kind}${pending ? ' pending' : ''}` },
-    h('div', { class: 'who', style: color ? `color:${color}` : null }, kind === 'byggmax' ? personaLabel(who) : who),
-    h('div', { class: 'text' }, text || (pending ? '…' : '')));
+  const av = kind === 'byggmax' ? avatar(initials(personaByTagLocal(who)?.name || 'B'), null, 'bm') : avatar(who[0], color);
+  const body = h('div', { class: 'text' }, text || '');
+  if (pending && !text) body.append(h('span', { class: 'typing' }, h('i'), h('i'), h('i')));
+  const el = h('div', { class: `msg ${kind}${pending ? ' pending' : ''}` }, av,
+    h('div', { class: 'bubble' }, h('div', { class: 'who', style: color ? `color:${color}` : null }, kind === 'byggmax' ? personaLabel(who) : who), body));
   $('transcript').append(el);
   el.scrollIntoView({ block: 'end', behavior: 'smooth' });
   return el;
 }
-function personaLabel(tag) { const p = PERSONAS.find((x) => x.tag === tag); return p ? `Byggmax · ${p.name} (${p.tag})` : `Byggmax · ${tag}`; }
-function setWho(el, tag) { el.querySelector('.who').textContent = personaLabel(tag); }
+function personaByTagLocal(tag) { return PERSONAS.find((x) => x.tag === tag); }
+function personaLabel(tag) { const p = personaByTagLocal(tag); return p ? `${p.name}, ${p.tag.toLowerCase()} · Byggmax` : `Byggmax · ${tag}`; }
+function setWho(el, tag) { el.querySelector('.who').textContent = personaLabel(tag); const p = personaByTagLocal(tag); if (p) el.querySelector('.avatar').textContent = initials(p.name); }
 function setText(el, t) { el.querySelector('.text').textContent = t; el.scrollIntoView({ block: 'end' }); }
 function addSystem(text) { const el = h('div', { class: 'msg system' }, text); $('transcript').append(el); el.scrollIntoView({ block: 'end' }); return el; }
 
@@ -459,7 +515,7 @@ function renderPanels() {
   const pl = $('phase-list'); pl.innerHTML = '';
   const cur = PHASES.findIndex((p) => p.key === s.phase);
   PHASES.forEach((p, i) => {
-    const li = h('li', { class: i < cur ? 'done' : i === cur ? 'cur' : '', title: p.next ? `Gå vidare när: ${p.next}` : '' }, p.name);
+    const li = h('li', { class: i < cur ? 'done' : i === cur ? 'cur' : '', 'data-n': String(i + 1), title: p.next ? `${p.name}. Gå vidare när: ${p.next.toLowerCase()}. Klicka för att byta fas.` : `${p.name}. Klicka för att byta fas.` }, p.name);
     li.addEventListener('click', () => {
       if (s.phase === p.key) return;
       s.phase = p.key; session.phaseLog.push({ phase: p.key, t: Date.now() }); renderPanels(); autosave();
@@ -474,8 +530,11 @@ function renderPanels() {
   }
   const pr = s.proposal;
   const pkg = pr.package ? HESTRA.packages[pr.package].name : '–';
+  $('deal-price').textContent = pr.pricePerStore ? fmtKr(pr.pricePerStore) : 'Inget pris ännu';
+  $('deal-price').style.fontSize = pr.pricePerStore ? '' : '1.1rem';
+  $('deal-price-sub').textContent = pr.pricePerStore ? `per butik · ${fmtKr(pr.pricePerStore * 3)} för alla tre` : 'Priset dyker upp här när det nämns';
   $('proposal').innerHTML = '';
-  for (const [k, v] of [['Paket', pkg], ['Pris/butik', fmtKr(pr.pricePerStore)], ['Tre butiker', fmtKr(pr.pricePerStore ? pr.pricePerStore * 3 : null)], ['Leverans', pr.delivery || '–'], ['Betalning', pr.paymentDays ? `${pr.paymentDays} dagar` : '–']]) {
+  for (const [k, v] of [['Paket', pkg], ['Leverans', pr.delivery || '–'], ['Betalning', pr.paymentDays ? `${pr.paymentDays} dagar` : '–']]) {
     $('proposal').append(h('dt', {}, k), h('dd', {}, v));
   }
   const fill = $('pricebar-fill');
@@ -486,18 +545,18 @@ function renderPanels() {
     fill.title = fmtKr(pr.pricePerStore);
   } else fill.style.display = 'none';
   const gv = $('gives'); gv.innerHTML = '';
-  if (!s.gives.length) gv.append(h('li', { class: 'empty' }, 'Inget ännu'));
+  if (!s.gives.length) gv.append(h('li', { class: 'empty' }, 'Inget ännu. Bra!'));
   for (const g of s.gives) {
     gv.append(h('li', {}, h('span', { class: 'val' }, g.value ? fmtKr(g.value) : ''), g.item,
-      h('span', { class: `ret${g.inReturn ? '' : ' none'}` }, g.inReturn ? `Mot: ${g.inReturn}` : 'Inget tillbaka')));
+      h('span', { class: `ret${g.inReturn ? '' : ' none'}` }, g.inReturn ? `✓ I utbyte mot: ${g.inReturn}` : '✗ Ni fick inget tillbaka')));
   }
-  $('given-total').textContent = s.gives.length ? `(${fmtKr(totalGiven(s))})` : '';
+  $('given-total').textContent = s.gives.length ? `· värt ${fmtKr(totalGiven(s))}` : '';
   const gt = $('gets'); gt.innerHTML = '';
   if (!s.gets.length) gt.append(h('li', { class: 'empty' }, 'Inget ännu'));
   for (const g of s.gets) gt.append(h('li', {}, g.item));
   const wl = $('warnings'); wl.innerHTML = '';
-  if (!s.warnings.length) wl.append(h('li', { class: 'empty', style: 'color:var(--muted)' }, 'Inga'));
-  for (const w of s.warnings.slice().reverse()) wl.append(h('li', {}, w.text));
+  $('warnings-box').hidden = !s.warnings.length;
+  for (const w of s.warnings.slice().reverse().slice(0, 4)) wl.append(h('li', {}, w.text));
 }
 
 function tickTimer() {
@@ -583,76 +642,78 @@ function renderDebrief(note, append = false) {
   const d = session.debrief;
   const st = computeStats(session);
   const lvl = effectiveLevel(session.settings);
-  if (note) body.append(h('p', { class: 'muted' }, note));
+  if (note) body.append(h('p', { class: 'lead' }, note));
+  const card = (title, ...kids) => h('section', { class: 'card' }, h('h2', {}, title), ...kids);
 
-  const result = s.dealReached ? 'Affär' : s.walkout ? 'Byggmax gick' : (d?.outcome?.deal ? 'Affär' : 'Ingen affär');
+  const deal = s.dealReached || Boolean(d?.outcome?.deal);
   const price = s.proposal.pricePerStore ?? d?.outcome?.pricePerStore ?? null;
   const pos = positionPct(price);
+  const kind = deal ? 'good' : s.walkout ? 'bad' : 'neutral';
+  const headline = deal ? 'Ni fick en affär' : s.walkout ? 'Byggmax lämnade mötet' : 'Ingen affär den här gången';
+  body.append(h('section', { class: `result-banner ${kind}` },
+    h('span', { class: 'emoji' }, deal ? '🤝' : s.walkout ? '🚪' : '💬'),
+    h('div', {}, h('div', { class: 'big' }, headline), h('div', {}, d?.outcome?.summary || `Nivå ${lvl.level}: ${lvl.name}`))));
   body.append(h('section', { class: 'outcome' },
-    stat('Resultat', result),
     stat('Pris per butik', fmtKr(price)),
-    stat('Tre butiker', fmtKr(price ? price * 3 : null)),
-    stat('Mellan 600k och 750k', pos == null ? '–' : `${pos} %`),
-    stat('Värde vi gett', fmtKr(totalGiven(s))),
-    stat('Nivå', `${lvl.level} ${lvl.name}`)));
-  if (d?.outcome?.summary || d?.outcome?.valueReceived) body.append(h('p', {}, d.outcome.summary || '', d.outcome.valueReceived ? h('span', { class: 'muted' }, ` Fick tillbaka: ${d.outcome.valueReceived}`) : null));
+    stat('Alla tre butiker', fmtKr(price ? price * 3 : null)),
+    stat('Nära målet 750 000', pos == null ? '–' : `${pos} %`),
+    stat('Värde ni gav bort', fmtKr(totalGiven(s))),
+    stat('Byggmax gav er', s.gets.length ? `${s.gets.length} sak${s.gets.length > 1 ? 'er' : ''}` : 'Inget')));
+  if (d?.outcome?.valueReceived) body.append(h('p', { class: 'lead', style: 'margin:-.4rem 0 1.2rem' }, `Ni fick tillbaka: ${d.outcome.valueReceived}`));
 
   if (d) {
-    body.append(h('h2', {}, 'Helhetsintryck'), h('p', {}, d.overall || ''));
-    if (d.topThree?.length) body.append(h('h2', {}, 'Tre saker till den riktiga förhandlingen'), h('ol', {}, d.topThree.map((x) => h('li', {}, x))));
-    body.append(h('h2', {}, 'Teknikerna'));
-    const card = h('div', { class: 'card' });
+    body.append(card('Coachens sammanfattning', h('p', {}, d.overall || '')));
+    if (d.topThree?.length) body.append(card('Tre saker att ta med till det riktiga mötet', h('ol', { class: 'top3' }, d.topThree.map((x) => h('li', {}, x)))));
+    const tc = card('Hur ni använde teknikerna');
     for (const t of d.techniques || []) {
       const name = TECHNIQUES.find((x) => x.key === t.key)?.name || t.key;
       const sc = Math.max(0, Math.min(5, t.score || 0));
-      card.append(h('div', { class: 'tech' }, h('strong', {}, name), h('span', { class: 'score' }, '●'.repeat(sc) + '○'.repeat(5 - sc)), h('div', {}, t.comment || '', quote(t.line))));
+      tc.append(h('div', { class: 'tech' }, h('strong', {}, name), h('span', { class: 'score', title: `${sc} av 5` }, '●'.repeat(sc) + '○'.repeat(5 - sc)), h('div', {}, t.comment || '', quote(t.line))));
     }
-    body.append(card);
+    body.append(tc);
 
-    body.append(h('h2', {}, 'Byggmax krav — vad hittade ni?'));
     const ids = Object.fromEntries(session.brief.requirements.map((r) => [r.id, r]));
-    const rq = h('ul', {});
+    const rq = h('ul', { class: 'reqs' });
     for (const u of d.raqsci?.uncovered || []) rq.append(h('li', { class: 'req-ok' }, ids[u.id]?.text || u.id, quote(u.line)));
     for (const m of d.raqsci?.missed || []) rq.append(h('li', { class: 'req-miss' }, ids[m]?.text || m));
-    body.append(rq);
+    body.append(card('Vad Byggmax behövde: hittade ni det?', h('p', { class: 'hint' }, '✓ = ni tog reda på det · ✗ = ni missade det'), rq));
 
-    body.append(h('h2', {}, 'Roller'));
-    const rc = h('div', { class: 'card' });
+    const rc = card('Varje person');
     for (const r of d.roles || []) {
       const role = roleByKey(r.key);
       if (!role) continue;
       const share = st.speakingShare[r.key] ?? 0;
-      rc.append(h('div', { class: 'tech' }, h('strong', {}, role.name), h('span', {}, h('span', { class: 'share', style: `width:${Math.max(4, share * 0.6)}px` }), `${share} %`), h('div', {}, h('span', { class: 'muted small' }, role.area + '. '), r.tip || '', quote(r.line))));
+      rc.append(h('div', { class: 'tech' },
+        h('span', { style: 'display:flex;gap:.6rem;align-items:center' }, avatar(role.name[0], `var(--${role.key})`), h('span', {}, h('strong', {}, role.name), h('br'), h('span', { class: 'small', style: 'color:var(--muted)' }, role.area))),
+        h('span', { title: 'Andel av teamets prat' }, h('span', { class: 'share', style: `width:${Math.max(4, share * 0.6)}px` }), `${share} %`),
+        h('div', {}, r.tip || '', quote(r.line))));
     }
     body.append(rc);
   }
 
-  body.append(h('h2', {}, 'Faser och tid'));
   const ph = h('ul', {});
   for (const p of PHASES) if (st.phaseMinutes[p.key]) ph.append(h('li', {}, `${p.name}: ${st.phaseMinutes[p.key]} min`));
-  body.append(ph);
-  if (d?.phases) body.append(h('p', {}, d.phases.comment || ''), h('p', {}, (d.phases.endedWithSummary ? '✔ ' : '✘ ') + (d.phases.summaryComment || '')));
+  const phaseCard = card('Mötets faser', ph);
+  if (d?.phases) phaseCard.append(h('p', {}, d.phases.comment || ''), h('p', {}, (d.phases.endedWithSummary ? '✓ ' : '✗ ') + (d.phases.summaryComment || '')));
+  body.append(phaseCard);
 
   if (s.warnings.length) {
-    body.append(h('h2', {}, 'Varningar under mötet'));
-    body.append(h('ul', {}, s.warnings.map((w) => h('li', {}, w.text, quote(w.turn)))));
+    body.append(card('Det här hände under mötet', h('ul', { class: 'warnings' }, s.warnings.map((w) => h('li', {}, w.text, quote(w.turn))))));
   }
 
-  body.append(h('h2', {}, 'Byggmax hemliga brief'));
-  const bc = h('div', { class: 'card' },
-    h('p', {}, h('strong', {}, `Budgettak: ${fmtKr(lvl.ceiling)} per butik. `), `Öppningskrav: ${fmtKr(lvl.opening)}.`),
-    h('ul', {}, session.brief.requirements.map((r) => h('li', {}, h('strong', {}, `${r.level} (${r.type}): `), r.text, h('span', { class: 'muted small' }, r.reveal === 'asked' ? ' — bara om ni frågade' : ' — sa de själva')))),
-    h('p', {}, h('strong', {}, 'BATNA: '), session.brief.batna));
-  body.append(bc);
+  body.append(card('Byggmax hemliga brief',
+    h('p', { class: 'hint' }, 'Det här visste Byggmax, men inte ni.'),
+    h('p', {}, h('strong', {}, `Högsta pris de kunde betala: ${fmtKr(lvl.ceiling)} per butik. `), `De började på ${fmtKr(lvl.opening)}.`),
+    h('ul', { class: 'reqs' }, session.brief.requirements.map((r) => h('li', {}, h('strong', {}, `${r.level} (${r.type}): `), r.text, h('span', { class: 'small', style: 'color:var(--muted)' }, r.reveal === 'asked' ? ' — sa det bara om ni frågade' : ' — tog upp det själva')))),
+    h('p', {}, h('strong', {}, 'Om ni inte kom överens: '), session.brief.batna)));
 
-  if (st.medianLatencyMs) body.append(h('p', { class: 'muted small' }, `Byggmax svarstid (median, från att ni slutade prata till ljud): ${(st.medianLatencyMs / 1000).toFixed(1)} s`));
-
-  const tr = h('details', { class: 'card' }, h('summary', {}, `Transkript (${session.transcript.length} repliker)`));
+  const tr = h('details', { class: 'card' }, h('summary', { style: 'cursor:pointer;font-weight:600' }, `Hela samtalet (${session.transcript.length} repliker)`));
   session.transcript.forEach((l) => {
     const who = l.speaker === 'byggmax' ? `Byggmax (${l.persona})` : l.name;
     tr.append(h('p', {}, h('strong', {}, `${who}: `), l.text));
   });
   body.append(tr);
+  if (st.medianLatencyMs) body.append(h('p', { class: 'small', style: 'color:var(--muted)' }, `Byggmax svarstid (median): ${(st.medianLatencyMs / 1000).toFixed(1)} s`));
 }
 
 function stat(k, v) { return h('div', { class: 'stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v)); }

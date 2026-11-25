@@ -5,10 +5,10 @@ const PHASE_KEYS = PHASES.map((p) => p.key);
 const AGENDA_KEYS = AGENDA.map((a) => a.key);
 
 export const WARNING_TEXT = {
-  gift_without_return: 'Eftergift utan att be om något tillbaka',
-  below_floor: 'Priset är under 600 000 kr per butik',
-  promised_all_feb1: 'Löfte om att allt är klart i alla butiker 1 februari',
-  discount_before_asking: 'Rabatt erbjuden innan ni frågat "hur mycket för högt?"',
+  gift_without_return: 'Ni gav bort något utan att be om något tillbaka',
+  below_floor: 'Priset är under ert golv på 600 000 kr per butik',
+  promised_all_feb1: 'Ni lovade att allt blir klart i alla butiker 1 februari',
+  discount_before_asking: 'Ni gav rabatt innan ni frågat "hur mycket för högt är priset?"',
 };
 
 export function initialState() {
