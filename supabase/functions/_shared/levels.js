@@ -56,3 +56,11 @@ export const MODIFIERS = {
 export function levelByNumber(n) {
   return LEVELS.find((l) => l.level === Number(n)) || LEVELS[DEFAULT_LEVEL - 1];
 }
+
+// Level for a session, with optional edited budget numbers: settings.levelValues = {3: {ceiling, opening}}
+export function effectiveLevel(settings = {}) {
+  const base = levelByNumber(settings.level);
+  const o = settings.levelValues?.[base.level] || {};
+  const num = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 100000 ? Math.round(Number(v)) : d);
+  return { ...base, ceiling: num(o.ceiling, base.ceiling), opening: num(o.opening, base.opening) };
+}

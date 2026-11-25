@@ -1,6 +1,6 @@
 // Builds Byggmax's system prompt and parses the model's turn output.
 import { HESTRA, PHASES, AGENDA, ROLES } from './hestra.js';
-import { levelByNumber, TACTICS, MODIFIERS } from './levels.js';
+import { effectiveLevel, TACTICS, MODIFIERS } from './levels.js';
 import { PERSONAS } from './personas.js';
 import { defaultBrief } from './brief.js';
 
@@ -9,7 +9,7 @@ export const STATE_DELIM = '###STATE###';
 const kr = (n) => `${Number(n).toLocaleString('sv-SE').replace(/ /g, ' ')} kr`;
 
 export function buildTurnSystem({ settings = {}, brief, state } = {}) {
-  const lvl = levelByNumber(settings.level);
+  const lvl = effectiveLevel(settings);
   const b = brief && Array.isArray(brief.requirements) ? brief : defaultBrief();
   const personas = settings.onePersona ? [PERSONAS[0]] : PERSONAS;
   const present = ROLES.filter((r) => !settings.present || settings.present.includes(r.key));
@@ -67,7 +67,7 @@ Sedan ett JSON-objekt (ingen kodblocksmarkering) med det som ÄNDRATS denna tur:
 {
   "persona": "${personas.map((p) => p.tag).join('" | "')}",
   "phase": "${PHASES.map((p) => p.key).join('|')}" eller null,
-  "agenda": [punkter som diskuterats denna tur, av: ${AGENDA.map((a) => a.key).join(', ')}],
+  "agenda": [agendapunkter som faktiskt diskuterats i sak denna tur (inte bara nämnts), av: ${AGENDA.map((a) => a.key).join(', ')}; "sammanfattning" bara när någon sammanfattar affären mot slutet],
   "gives": [eftergifter HESTRA gjort denna tur: {"key": ${Object.keys(HESTRA.concessions).map((k) => `"${k}"`).join('|')}|null, "item": "kort beskrivning", "value": kronor eller null, "inReturn": "vad Hestra bad om i utbyte" eller null}],
   "gets": [eftergifter BYGGMAX (du) gjort denna tur: {"item": "kort beskrivning"}],
   "proposal": {endast ändrade fält: "package": "start|smart|signatur", "pricePerStore": heltal kronor per butik, "delivery": "kort", "paymentDays": heltal},

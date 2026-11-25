@@ -1,7 +1,7 @@
 // Debrief prompt and parser. Quotes are referenced by transcript line number so the
 // client shows the real line and the real speaker.
 import { HESTRA, ROLES } from './hestra.js';
-import { levelByNumber } from './levels.js';
+import { effectiveLevel } from './levels.js';
 
 export const TECHNIQUES = [
   { key: 'nagot_for_nagot', name: 'Något för något' },
@@ -30,7 +30,7 @@ Ta med alla sju tekniker och en rad per närvarande roll.`;
 }
 
 export function buildDebriefUser({ settings = {}, brief, transcript = [], state, stats } = {}) {
-  const lvl = levelByNumber(settings.level);
+  const lvl = effectiveLevel(settings);
   const lines = transcript.map((t, i) => {
     const who = t.speaker === 'byggmax' ? `Byggmax/${t.persona || 'Inköpschef'}` : t.name;
     return `L${i}: ${who}: ${t.text}`;

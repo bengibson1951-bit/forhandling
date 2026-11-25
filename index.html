@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Förhandlingsträning – Byggmax</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%231f4e79'/><text x='32' y='44' font-size='34' text-anchor='middle' fill='white' font-family='Arial' font-weight='700'>F</text></svg>">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <!-- Passphrase -->
+  <section id="screen-pass" class="screen" hidden>
+    <div class="card narrow">
+      <h1>Förhandlingsträning</h1>
+      <p class="muted">Hestra Inredningar × Byggmax</p>
+      <form id="pass-form">
+        <label for="pass-input">Teamets lösenord</label>
+        <input id="pass-input" type="password" autocomplete="current-password" required>
+        <p id="pass-error" class="error" hidden></p>
+        <button class="btn primary" type="submit">Fortsätt</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- Setup -->
+  <section id="screen-setup" class="screen" hidden>
+    <div class="setup-wrap">
+      <header class="setup-head">
+        <h1>Förhandlingsträning <span class="muted">Hestra × Byggmax</span></h1>
+        <button id="btn-history" class="btn ghost" type="button">Tidigare möten</button>
+      </header>
+
+      <div class="setup-grid">
+        <fieldset class="card">
+          <legend>Hur svår är Byggmax?</legend>
+          <div id="level-list" class="level-list"></div>
+        </fieldset>
+
+        <div class="setup-col">
+          <fieldset class="card">
+            <legend>Vilka är med?</legend>
+            <div id="present-list" class="chips"></div>
+          </fieldset>
+
+          <fieldset class="card">
+            <legend>Scenario (valfritt)</legend>
+            <div id="modifier-list" class="chips"></div>
+          </fieldset>
+
+          <fieldset class="card">
+            <legend>Inställningar</legend>
+            <label class="row">Mötets längd
+              <select id="opt-length">
+                <option value="20">20 min</option><option value="30">30 min</option>
+                <option value="45" selected>45 min</option><option value="60">60 min</option><option value="90">90 min</option>
+              </select>
+            </label>
+            <label class="row">Byggmax deltagare
+              <select id="opt-personas">
+                <option value="2">Två (Inköpschef + Projektledare)</option>
+                <option value="1">En (Inköpschef)</option>
+              </select>
+            </label>
+            <label class="row">Prata-knapp
+              <select id="opt-ptt">
+                <option value="toggle">Klicka för att börja/sluta</option>
+                <option value="hold">Håll ned medan du pratar</option>
+              </select>
+            </label>
+            <label class="row">Byggmax röst
+              <select id="opt-voice">
+                <option value="replicate">AI-röst (Replicate)</option>
+                <option value="browser">Webbläsarens röst</option>
+                <option value="off">Ingen röst, bara text</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" id="opt-fast"> Snabbläge (hoppa över extra taligenkänning)</label>
+            <label class="check"><input type="checkbox" id="opt-panels" checked> Visa sidopaneler</label>
+            <label class="check"><input type="checkbox" id="opt-wheels"> Stödhjul (coachningsrad efter varje svar)</label>
+          </fieldset>
+
+          <details class="card" id="brief-details">
+            <summary>Visa och ändra Byggmax hemliga brief</summary>
+            <p class="muted small">Om ni tittar här vet ni vad Byggmax vill — bra för att förbereda, sämre för realistisk träning.</p>
+            <div id="brief-editor"></div>
+          </details>
+        </div>
+      </div>
+
+      <div class="setup-actions">
+        <p id="setup-error" class="error" hidden></p>
+        <button id="btn-start" class="btn primary big" type="button">Starta mötet</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Role-play -->
+  <section id="screen-play" class="screen" hidden>
+    <header class="play-head">
+      <div class="play-title">
+        <strong>Byggmax</strong> <span id="play-level" class="pill"></span>
+        <span id="play-mods" class="muted small"></span>
+      </div>
+      <div class="play-tools">
+        <span id="timer" class="timer">45:00</span>
+        <button id="btn-panels" class="btn ghost" type="button">Dölj paneler</button>
+        <button id="btn-pause" class="btn ghost" type="button">Paus</button>
+        <button id="btn-end" class="btn danger" type="button">Avsluta mötet</button>
+      </div>
+    </header>
+
+    <div class="play-grid" id="play-grid">
+      <aside class="panel left" id="panel-left">
+        <h3>Fas</h3>
+        <ol id="phase-list" class="phase-list"></ol>
+        <h3>Agenda</h3>
+        <ul id="agenda-list" class="agenda-list"></ul>
+      </aside>
+
+      <main class="convo">
+        <div id="speaking-now" class="speaking-now" aria-live="polite"></div>
+        <div id="transcript" class="transcript" aria-live="polite"></div>
+        <div id="coach" class="coach" hidden></div>
+      </main>
+
+      <aside class="panel right" id="panel-right">
+        <h3>Aktuellt förslag</h3>
+        <dl id="proposal" class="proposal"></dl>
+        <div class="pricebar" id="pricebar">
+          <div class="pricebar-track"><div class="pricebar-fill" id="pricebar-fill"></div>
+            <span class="tick floor">600k</span><span class="tick target">750k</span></div>
+        </div>
+        <h3>Vi har gett <span id="given-total" class="muted small"></span></h3>
+        <ul id="gives" class="ledger"></ul>
+        <h3>Vi har fått</h3>
+        <ul id="gets" class="ledger"></ul>
+        <h3>Varningar</h3>
+        <ul id="warnings" class="warnings"></ul>
+      </aside>
+    </div>
+
+    <footer class="play-foot">
+      <div id="draft" class="draft" hidden>
+        <div class="draft-who" id="draft-who"></div>
+        <textarea id="draft-text" rows="2" placeholder="Transkribering…"></textarea>
+        <div class="draft-actions">
+          <span id="draft-status" class="muted small"></span>
+          <button id="btn-discard" class="btn ghost" type="button">Släng</button>
+          <button id="btn-send" class="btn primary" type="button">Skicka</button>
+        </div>
+      </div>
+      <div class="ptt-row" id="ptt-row"></div>
+      <form class="text-row" id="text-form">
+        <select id="text-who" aria-label="Vem skriver"></select>
+        <input id="text-input" type="text" placeholder="Skriv i stället för att prata…" autocomplete="off">
+        <button class="btn" type="submit">Skicka</button>
+      </form>
+    </footer>
+    <div id="pause-overlay" class="overlay" hidden><div class="card narrow"><h2>Paus</h2><button id="btn-resume" class="btn primary">Fortsätt mötet</button></div></div>
+  </section>
+
+  <!-- Debrief -->
+  <section id="screen-debrief" class="screen" hidden>
+    <div class="debrief-wrap">
+      <header class="setup-head">
+        <h1>Debrief</h1>
+        <div>
+          <button id="btn-export" class="btn" type="button">Exportera (Markdown)</button>
+          <button id="btn-new" class="btn primary" type="button">Nytt möte</button>
+        </div>
+      </header>
+      <div id="debrief-body"></div>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section id="screen-history" class="screen" hidden>
+    <div class="debrief-wrap">
+      <header class="setup-head"><h1>Tidigare möten</h1><button id="btn-history-back" class="btn" type="button">Tillbaka</button></header>
+      <ul id="history-list" class="history-list"></ul>
+    </div>
+  </section>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

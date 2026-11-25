@@ -49,6 +49,7 @@ async function anthropic(env, payload) {
     headers: {
       'x-api-key': env.ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'server-side-fallback-2026-07-01',
       'content-type': 'application/json',
     },
     body: JSON.stringify(payload),
@@ -82,6 +83,8 @@ export async function handleTurn(req, env) {
     model: MODELS.turn,
     max_tokens: 900,
     stream: true,
+    output_config: { effort: "low" }, // low effort = ~0.5 s to first word; default high thinks for ~4 s
+    fallbacks: "default",
     system: buildTurnSystem({ settings, brief, state }),
     messages: buildMessages(transcript),
   });
@@ -195,7 +198,9 @@ export async function handleDebrief(req, env) {
   const { settings = {}, brief, transcript = [], state, stats } = await readJson(req);
   const r = await anthropic(env, {
     model: MODELS.debrief,
-    max_tokens: 6000,
+    max_tokens: 16000,
+    output_config: { effort: "high" },
+    fallbacks: "default",
     system: buildDebriefSystem(),
     messages: [{ role: 'user', content: buildDebriefUser({ settings, brief: brief || defaultBrief(), transcript, state, stats }) }],
   });

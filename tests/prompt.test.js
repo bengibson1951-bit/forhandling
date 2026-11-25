@@ -48,3 +48,9 @@ test('parse output without or with broken state', () => {
   assert.equal(b.speech, 'För dyrt.');
   assert.equal(b.update, null);
 });
+
+test('edited budget numbers override the level defaults', () => {
+  const s = buildTurnSystem({ settings: { level: 3, levelValues: { 3: { ceiling: 699000, opening: '600000' } } } });
+  assert.match(s, /699 000 kr/);
+  assert.match(s, /Ditt öppningskrav: 600 000 kr/);
+});
