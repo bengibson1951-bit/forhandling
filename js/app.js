@@ -65,7 +65,7 @@ $('pass-form').addEventListener('submit', async (ev) => {
 function defaultSettings() {
   return {
     level: DEFAULT_LEVEL, present: ROLES.map((r) => r.key), modifiers: {}, length: 45, onePersona: false,
-    pttMode: 'toggle', voice: 'replicate', fast: false, panels: true, trainingWheels: false, levelValues: {},
+    pttMode: 'toggle', voice: 'replicate', fast: true, panels: true, trainingWheels: false, levelValues: {},
   };
 }
 
@@ -108,7 +108,7 @@ function renderSetup() {
   $('opt-ptt').value = settings.pttMode;
   $('opt-voice').value = settings.voice;
   $('opt-voice').querySelector('[value=replicate]').disabled = !config.replicate;
-  $('opt-fast').checked = settings.fast;
+  $('opt-fast').checked = !settings.fast;
   $('opt-fast').disabled = !config.replicate;
   $('opt-panels').checked = settings.panels;
   $('opt-wheels').checked = settings.trainingWheels;
@@ -119,9 +119,9 @@ function saveSettings() { store.settings = settings; }
 
 for (const [id, key, conv] of [
   ['opt-length', 'length', Number], ['opt-personas', 'onePersona', (v) => v === '1'], ['opt-ptt', 'pttMode', String],
-  ['opt-voice', 'voice', String], ['opt-fast', 'fast', null], ['opt-panels', 'panels', null], ['opt-wheels', 'trainingWheels', null],
+  ['opt-voice', 'voice', String], ['opt-fast', 'fast', (v, el) => !el.checked], ['opt-panels', 'panels', null], ['opt-wheels', 'trainingWheels', null],
 ]) {
-  $(id).addEventListener('change', (e) => { settings[key] = conv ? conv(e.target.value) : e.target.checked; saveSettings(); });
+  $(id).addEventListener('change', (e) => { settings[key] = conv ? conv(e.target.value, e.target) : e.target.checked; saveSettings(); });
 }
 
 function renderBriefEditor() {
@@ -191,7 +191,7 @@ function startSession() {
     onSpeaking: (p) => setSpeaking(p ? `${p} talar…` : ''),
     onFirstAudio: () => { if (lastReleaseAt) { session.latencies.push(Date.now() - lastReleaseAt); lastReleaseAt = 0; autosave(); } },
   });
-  voiceIn = new VoiceIn({ onInterim: (t) => { if (recording) $('draft-text').value = t; }, record: config.replicate && !settings.fast });
+  voiceIn = new VoiceIn({ onInterim: (t) => { if (recording) $('draft-text').value = t; }, record: config.replicate });
   const lvl = effectiveLevel(settings);
   $('play-level').textContent = `Nivå ${lvl.level}: ${lvl.name}`;
   $('play-mods').textContent = Object.entries(settings.modifiers).filter(([, v]) => v).map(([k]) => MODIFIERS[k].name).join(' · ');
@@ -263,7 +263,7 @@ async function pttUp(role) {
   $('draft-status').textContent = 'Avslutar…';
   const { text, blob, mime } = await voiceIn.stop();
   $('draft-text').value = text;
-  const wantStt = config.replicate && !settings.fast && blob && blob.size > 2000;
+  const wantStt = config.replicate && blob && blob.size > 2000 && (!settings.fast || !text);
   if (!text && !wantStt) { $('draft-status').textContent = 'Inget hördes. Försök igen eller skriv.'; setTimeout(() => { if (draft && !draft.edited && !$('draft-text').value) hideDraft(); }, 2500); return; }
   draft.releasedAt = releasedAt;
   if (wantStt) {
@@ -295,7 +295,7 @@ function showDraft(role, text, status) {
 }
 function hideDraft() { clearTimeout(draft?.autoTimer); draft = null; $('draft').hidden = true; }
 
-const AUTO_SEND_MS = 1500;
+const AUTO_SEND_MS = 1200;
 function scheduleAutoSend() {
   if (!draft || draft.edited) return;
   const d = draft;

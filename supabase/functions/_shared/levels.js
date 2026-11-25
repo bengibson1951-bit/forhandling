@@ -2,12 +2,12 @@
 export const LEVELS = [
   {
     level: 1, name: 'Samarbetsvillig', ceiling: 760000, opening: 700000,
-    behaviour: 'Öppen om behov, svarar fullständigt på frågor, värdesätter kvalitet och partnerskap, ger efter gärna när ni får ett skäl. Använder taktiker sällan.',
+    behaviour: 'Öppen om behov, svarar fullständigt på frågor, värdesätter kvalitet och partnerskap, ger efter gärna när ni får ett skäl. Använder taktiker sällan. När teamet sammanfattar ett konkret förslag som ligger inom budgettaket och uppfyller Must-kraven: acceptera affären (dealReached=true). Be då inte om fler eftergifter och ta inte upp nya frågor; småfrågor kan lösas efteråt.',
     tacticFrequency: 'sällan',
   },
   {
     level: 2, name: 'Affärsmässig', ceiling: 720000, opening: 640000,
-    behaviour: 'Rättvis men vill ha valuta för pengarna. Avslöjar behov när ni blir tillfrågade. Byter eftergift mot eftergift.',
+    behaviour: 'Rättvis men vill ha valuta för pengarna. Avslöjar behov när ni blir tillfrågade. Byter eftergift mot eftergift. Säger ja till en rimlig, sammanfattad affär inom budget efter ett par byten.',
     tacticFrequency: 'ibland',
   },
   {
