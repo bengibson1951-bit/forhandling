@@ -15,7 +15,7 @@ export const TECHNIQUES = [
 
 export function buildDebriefSystem() {
   return `Du är en erfaren förhandlingscoach som ger feedback till ett studentteam (Hestra Inredningar) efter ett övningsmöte med Byggmax. Var konkret, ärlig och uppmuntrande. Skriv på enkel, vardaglig svenska med korta meningar — teamet är inte vana vid fackord. Undvik förkortningar som RAQSCI och BATNA; säg i stället "Byggmax krav" och "deras alternativ". Bedöm mot kursens vinnande tekniker: ${TECHNIQUES.map((t) => t.name).join(', ')}.
-Hänvisa till repliker med deras radnummer (L-nummer) från transkriptet; hitta aldrig på citat. Om en teknik inte förekom, ange line som null och förklara vad de kunde ha sagt.
+Kommentera i helhetsintrycket hur teamets ton och bemötande påverkade stämningen med Byggmax (fältet relation i slutläget, −3 till +3), och peka på repliker som gjorde den bättre eller sämre. Hänvisa till repliker med deras radnummer (L-nummer) från transkriptet; hitta aldrig på citat. Om en teknik inte förekom, ange line som null och förklara vad de kunde ha sagt.
 Svara ENDAST med ett JSON-objekt, utan kodblocksmarkering, enligt schemat:
 {
   "overall": "3–5 meningar: helhetsintryck",

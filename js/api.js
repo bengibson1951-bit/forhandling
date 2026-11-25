@@ -61,7 +61,7 @@ export async function streamTurn(body, handlers, { signal } = {}) {
       const dataLine = block.match(/^data: (.*)$/m)?.[1];
       if (!ev || !dataLine) continue;
       let data; try { data = JSON.parse(dataLine); } catch { continue; }
-      if (ev === 'persona') handlers.persona?.(data.persona);
+      if (ev === 'persona') handlers.persona?.(data.persona, data.tone);
       else if (ev === 'speech') handlers.speech?.(data.text);
       else if (ev === 'state') handlers.state?.(data);
       else if (ev === 'error') handlers.error?.(data.error);

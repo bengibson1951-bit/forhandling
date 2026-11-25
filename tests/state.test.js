@@ -66,3 +66,13 @@ test('applyUpdate does not mutate input', () => {
   applyUpdate(a, { gives: [{ key: 'montering' }], agenda: ['priser'] }, 1);
   assert.equal(JSON.stringify(a), snap);
 });
+
+test('relation is clamped and keeps the reason when it changes', () => {
+  let s = applyUpdate(initialState(), { relation: -2, relationNote: 'Otrevlig ton' }, 1);
+  assert.equal(s.relation, -2);
+  assert.equal(s.relationNote, 'Otrevlig ton');
+  s = applyUpdate(s, { relation: -9 }, 2);
+  assert.equal(s.relation, -3);
+  s = applyUpdate(s, { relation: 'x' }, 3);
+  assert.equal(s.relation, -3);
+});

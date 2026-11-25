@@ -301,7 +301,7 @@ function enterPlay() {
   voiceOut?.stop();
   voiceOut = new VoiceOut({
     mode: shared && settings.soundOff ? 'off' : baseVoiceMode(),
-    tts: async (text, persona) => (await (ttsCache.get(persona + text) || post('fh-tts', { text, persona }).then((r) => r.url))),
+    tts: async (text, persona, tone) => (await (ttsCache.get(persona + text) || post('fh-tts', { text, persona, tone }).then((r) => r.url))),
     personas: PERSONAS,
     onSpeaking: (p) => { speakingPersona = p; refreshStatus(); },
     onFirstAudio: () => { if (lastReleaseAt) { session.latencies.push(Date.now() - lastReleaseAt); lastReleaseAt = 0; autosave(); } },
@@ -712,6 +712,7 @@ async function runTurn() {
   const myTurn = ++turnId;
   voiceOut.markTurnStart();
   let persona = personas()[0].tag;
+  let tone = null;
   let shown = '';
   let buf = '';
   let enqueued = false;
@@ -728,17 +729,17 @@ async function runTurn() {
     if (mutedTurn === myTurn || turnId !== myTurn) return;
     if (room && isHost) {
       const seq = ++saySeq;
-      const p = config.replicate ? post('fh-tts', { text: s, persona }).then((r) => r.url).catch(() => null) : Promise.resolve(null);
+      const p = config.replicate ? post('fh-tts', { text: s, persona, tone }).then((r) => r.url).catch(() => null) : Promise.resolve(null);
       ttsCache.set(persona + s, p);
       setTimeout(() => ttsCache.delete(persona + s), 60000);
       room.send('say', { seq, text: s, persona, turn: myTurn });
       p.then((url) => room?.send('sayurl', { seq, url }));
     }
-    voiceOut.enqueue(s, persona); enqueued = true;
+    voiceOut.enqueue(s, persona, tone); enqueued = true;
   };
   try {
     await streamTurn({ settings: session.settings, brief: session.brief, transcript: session.transcript, state: session.state }, {
-      persona: (p) => { persona = normalizePersona(p); setWho(el, persona); },
+      persona: (p, t) => { persona = normalizePersona(p); tone = t || tone; setWho(el, persona); },
       speech: (t) => {
         shown += t; buf += t;
         setText(el, shown.trim());
@@ -752,8 +753,9 @@ async function runTurn() {
         if (buf.trim()) speak(buf.trim());
         buf = '';
         persona = normalizePersona(data.persona || persona);
+        tone = data.tone || tone;
         setWho(el, persona); setText(el, finalText); el.classList.remove('pending');
-        session.transcript.push({ speaker: 'byggmax', persona, text: finalText, t: Date.now(), coach: data.update?.coach || undefined });
+        session.transcript.push({ speaker: 'byggmax', persona, tone: tone || undefined, text: finalText, t: Date.now(), coach: data.update?.coach || undefined });
         const before = session.state.phase;
         session.state = applyUpdate(session.state, data.update, session.transcript.length - 1);
         if (session.state.phase !== before) session.phaseLog.push({ phase: session.state.phase, t: Date.now() });
@@ -860,6 +862,12 @@ function renderPanels() {
     fill.style.left = `calc(${pct}% - 2px)`; fill.style.display = 'block';
     fill.title = fmtKr(pr.pricePerStore);
   } else fill.style.display = 'none';
+  const rel = Number(s.relation) || 0;
+  const MOOD = { '-3': ['😠', 'Mycket dålig'], '-2': ['😤', 'Irriterade'], '-1': ['😕', 'Lite svala'], 0: ['😐', 'Neutral'], 1: ['🙂', 'Positiva'], 2: ['😊', 'Mycket positiva'], 3: ['🤩', 'Vill göra affär'] };
+  const [face, label] = MOOD[rel] || MOOD[0];
+  const mood = $('mood'); mood.innerHTML = '';
+  mood.className = `mood${rel < 0 ? ' bad' : rel > 0 ? ' good' : ''}`;
+  mood.append(h('span', { class: 'face' }, face), h('span', {}, h('strong', {}, `Byggmax: ${label}`), s.relationNote && rel !== 0 ? h('span', { class: 'why' }, s.relationNote) : null));
   const gv = $('gives'); gv.innerHTML = '';
   if (!s.gives.length) gv.append(h('li', { class: 'empty' }, 'Inget ännu. Bra!'));
   for (const g of s.gives) {

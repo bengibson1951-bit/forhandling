@@ -29,7 +29,8 @@ test('OPTIONS preflight passes without pass', async () => {
 });
 
 test('visibleSpeech hides tag, partial delimiter and state', () => {
-  assert.deepEqual(visibleSpeech('[Inköp'), { persona: null, speech: '' });
-  assert.deepEqual(visibleSpeech('[Inköpschef] Hej där.\n##'), { persona: 'Inköpschef', speech: 'Hej där.\n' });
-  assert.deepEqual(visibleSpeech('[Inköpschef] Hej.\n###STATE###\n{"a":1}'), { persona: 'Inköpschef', speech: 'Hej.\n' });
+  assert.deepEqual(visibleSpeech('[Inköp'), { persona: null, tone: null, speech: '' });
+  assert.deepEqual(visibleSpeech('[Inköpschef] Hej där.\n##'), { persona: 'Inköpschef', tone: null, speech: 'Hej där.\n' });
+  assert.deepEqual(visibleSpeech('[Inköpschef] Hej.\n###STATE###\n{"a":1}'), { persona: 'Inköpschef', tone: null, speech: 'Hej.\n' });
+  assert.deepEqual(visibleSpeech('[Projektledare|orolig] Oj.'), { persona: 'Projektledare', tone: 'orolig', speech: 'Oj.' });
 });

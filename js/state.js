@@ -20,6 +20,8 @@ export function initialState() {
     gets: [],
     revealed: [],
     warnings: [],
+    relation: 0,
+    relationNote: null,
     walkout: false,
     dealReached: false,
   };
@@ -92,6 +94,11 @@ export function applyUpdate(state, update, turn) {
     if (f.discountBeforeAsking) warn('discount_before_asking');
   }
 
+  if (update.relation !== undefined && update.relation !== null && Number.isFinite(Number(update.relation))) {
+    const r = Math.max(-3, Math.min(3, Math.round(Number(update.relation))));
+    if (r !== s.relation) s.relationNote = str(update.relationNote) || s.relationNote;
+    s.relation = r;
+  }
   if (update.walkout === true) s.walkout = true;
   if (update.dealReached === true) s.dealReached = true;
   return s;

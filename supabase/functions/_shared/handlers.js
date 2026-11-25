@@ -1,10 +1,23 @@
 // Web-API request handlers shared by Supabase Edge Functions (Deno) and dev/server.mjs (Node).
-import { buildTurnSystem, buildMessages, parseTurnOutput, STATE_DELIM } from './prompt.js';
+import { buildTurnSystem, buildMessages, parseTurnOutput, parseTag, STATE_DELIM } from './prompt.js';
 import { buildDebriefSystem, buildDebriefUser, parseDebrief } from './debrief.js';
 import { defaultBrief } from './brief.js';
 import { LEVELS, MODIFIERS } from './levels.js';
 import { PERSONAS, personaByTag } from './personas.js';
 import { MODELS } from './models.js';
+
+// How each tone sounds (MiniMax emotion + speed).
+const TONE_VOICE = {
+  neutral: { emotion: 'neutral', speed: 1.05 },
+  varm: { emotion: 'happy', speed: 1.02 },
+  road: { emotion: 'happy', speed: 1.08 },
+  skeptisk: { emotion: 'calm', speed: 1.0 },
+  otalig: { emotion: 'angry', speed: 1.12 },
+  irriterad: { emotion: 'angry', speed: 1.08 },
+  arg: { emotion: 'angry', speed: 1.12 },
+  orolig: { emotion: 'fearful', speed: 1.1 },
+  forvanad: { emotion: 'surprised', speed: 1.05 },
+};
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -75,10 +88,11 @@ export function visibleSpeech(raw) {
   const t = text.trimStart();
   if (t.startsWith('[')) {
     const close = t.indexOf(']');
-    if (close < 0) return { persona: null, speech: '' };
-    return { persona: t.slice(1, close).trim(), speech: t.slice(close + 1).trimStart() };
+    if (close < 0) return { persona: null, tone: null, speech: '' };
+    const tag = parseTag(t.slice(1, close));
+    return { persona: tag.persona, tone: tag.tone, speech: t.slice(close + 1).trimStart() };
   }
-  return { persona: null, speech: t };
+  return { persona: null, tone: null, speech: t };
 }
 
 export async function handleTurn(req, env) {
@@ -122,7 +136,7 @@ export async function handleTurn(req, env) {
             if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
               raw += evt.delta.text;
               const v = visibleSpeech(raw);
-              if (v.persona && !personaSent) { send('persona', { persona: v.persona }); personaSent = true; }
+              if (v.persona && !personaSent) { send('persona', { persona: v.persona, tone: v.tone }); personaSent = true; }
               if (v.speech.length > sent) { send('speech', { text: v.speech.slice(sent) }); sent = v.speech.length; }
             } else if (evt.type === 'error') {
               send('error', { error: evt.error?.message || 'Modellfel' });
@@ -131,7 +145,7 @@ export async function handleTurn(req, env) {
         }
         const parsed = parseTurnOutput(raw);
         if (parsed.speech.length > sent) send('speech', { text: parsed.speech.slice(sent) });
-        send('state', { persona: parsed.persona, speech: parsed.speech, update: parsed.update });
+        send('state', { persona: parsed.persona, tone: parsed.tone, speech: parsed.speech, update: parsed.update });
         send('done', {});
       } catch (e) {
         send('error', { error: String(e?.message || e) });
@@ -163,16 +177,18 @@ async function replicateRun(env, model, input) {
 export async function handleTts(req, env) {
   const g = gate(req, env); if (g) return g;
   if (!env.REPLICATE_API_TOKEN) return json({ error: 'Ingen Replicate-nyckel.' }, 501);
-  const { text, persona } = await readJson(req);
+  const { text, persona, tone } = await readJson(req);
   if (!text || typeof text !== 'string') return json({ error: 'Text saknas.' }, 400);
   const p = personaByTag(persona);
+  const voice = TONE_VOICE[tone] || TONE_VOICE.neutral;
   try {
     const url = await replicateRun(env, MODELS.tts, {
       text: text.slice(0, 1000),
       voice_id: p.voice.replicate,
       language_boost: 'Swedish',
       audio_format: 'mp3',
-      speed: 1.05,
+      emotion: voice.emotion,
+      speed: voice.speed,
     });
     return json({ url: Array.isArray(url) ? url[0] : url });
   } catch (e) {

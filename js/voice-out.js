@@ -28,12 +28,12 @@ export class VoiceOut {
   // Call at the start of each Byggmax turn to measure time to first audio.
   markTurnStart() { this.firstPending = true; }
 
-  enqueue(text, personaTag) {
+  enqueue(text, personaTag, tone) {
     if (this.mode === 'off' || !text.trim()) return;
     const gen = this.gen;
-    const item = { text, personaTag, gen, url: null };
+    const item = { text, personaTag, tone, gen, url: null };
     if (this.mode === 'replicate') {
-      item.url = this.tts(text, personaTag).catch((e) => { console.warn('tts failed, browser fallback', e); return null; });
+      item.url = this.tts(text, personaTag, tone).catch((e) => { console.warn('tts failed, browser fallback', e); return null; });
     }
     this.queue.push(item);
     this.onItem?.(item);

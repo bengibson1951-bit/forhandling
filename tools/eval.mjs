@@ -5,6 +5,7 @@ import { initialState, applyUpdate } from '../js/state.js';
 import { effectiveLevel } from '../supabase/functions/_shared/levels.js';
 
 const env = process.env;
+const ALL_REPLIES = [];
 const NAMES = { kelli: 'Kelli', tova: 'Tova', erika: 'Erika', madelene: 'Madelene' };
 
 async function turn(session) {
@@ -18,7 +19,8 @@ async function turn(session) {
   const stateBlock = text.split('\n\n').find((b) => b.startsWith('event: state'));
   if (!stateBlock) throw new Error(`no state: ${text.slice(0, 300)}`);
   const data = JSON.parse(stateBlock.split('data: ')[1]);
-  session.transcript.push({ speaker: 'byggmax', persona: data.persona, text: data.speech });
+  session.transcript.push({ speaker: 'byggmax', persona: data.persona, tone: data.tone, text: data.speech });
+  ALL_REPLIES.push(data.speech);
   session.state = applyUpdate(session.state, data.update, session.transcript.length - 1);
   return data;
 }
@@ -102,6 +104,34 @@ for (const level of [2, 4, 5]) {
   const p = s.state.proposal.pricePerStore;
   check('L1 reasonable pitch: deal near 750k', s.state.dealReached && p >= 700000, `deal=${s.state.dealReached} price=${p}`);
 }
+
+// Mood: rudeness is noticed, repeated rudeness has consequences, politeness warms up.
+{
+  const { s, replies } = await play({ level: 3 }, [
+    ['kelli', 'Hej och välkomna.'],
+    ['tova', 'Ärligt talat, ni på Byggmax är bara snåla. Era krav är ett skämt.'],
+  ]);
+  check('rude remark → mood drops', s.state.relation < 0, replies[1]);
+}
+{
+  const { s } = await play({ level: 4 }, [
+    ['tova', 'Ni förstår uppenbarligen inte hur inredning fungerar.'],
+    ['tova', 'Sluta tjafsa nu. Antingen betalar ni vårt pris eller så kan ni glömma det.'],
+    ['kelli', 'Ja, och ert sätt att förhandla är patetiskt.'],
+  ]);
+  check('repeated rudeness → walkout or very bad mood', s.state.walkout || s.state.relation <= -2, `walkout=${s.state.walkout} relation=${s.state.relation}`);
+}
+{
+  const { s, replies } = await play({ level: 2 }, [
+    ['kelli', 'Hej Annika och Johan, roligt att ses. Vi har läst på om era pop-up-planer.'],
+    ['erika', 'Vad är viktigast för er när kunderna kommer in i butiken första dagen?'],
+    ['madelene', 'Johan, vad oroar dig mest när det gäller öppningen den första februari?'],
+  ]);
+  check('polite questions → mood not negative', s.state.relation >= 0);
+  check('replies do not all open with "Tack"', replies.filter((x) => /^tack/i.test(x.trim())).length <= 1);
+}
+const leaked = ALL_REPLIES.find((t) => /nivå|instruktion|svårighets|relation(en)? (är|på)|AI|språkmodell/i.test(t));
+check('no reply talks about levels, instructions or being an AI', !leaked, leaked ? `"${leaked}"` : '');
 
 const failed = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
