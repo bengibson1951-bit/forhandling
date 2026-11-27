@@ -130,6 +130,15 @@ for (const level of [2, 4, 5]) {
   check('polite questions → mood not negative', s.state.relation >= 0);
   check('replies do not all open with "Tack"', replies.filter((x) => /^tack/i.test(x.trim())).length <= 1);
 }
+{
+  const { s, replies } = await play({ level: 2 }, [
+    ['kelli', 'Hej! Vårt pris för Signatur är 780 000 per butik.'],
+    ['tova', 'Nej, vi kan inte gå ner så mycket. Det är vårt pris, vad kan ni ge oss för att vi ska röra oss?'],
+    ['erika', 'Ehm, alltså, vi vet inte riktigt exakt datum än men det ska nog gå bra.'],
+  ], { log: true });
+  check('L2 hard but polite bargaining → mood not negative', s.state.relation >= 0, `relation=${s.state.relation}`);
+  check('L2 no one-word brush-offs', !replies.some((x) => /^(nej|absolut inte)\.?$/i.test(x.trim())), replies.join(' | '));
+}
 const leaked = ALL_REPLIES.find((t) => /nivå|instruktion|svårighets|relation(en)? (är|på)|AI|språkmodell/i.test(t));
 check('no reply talks about levels, instructions or being an AI', !leaked, leaked ? `"${leaked}"` : '');
 

@@ -7,8 +7,8 @@ export const LEVELS = [
   },
   {
     level: 2, name: 'Affärsmässig', ceiling: 720000, opening: 640000,
-    behaviour: 'Rättvis men vill ha valuta för pengarna. Avslöjar behov när ni blir tillfrågade. Byter eftergift mot eftergift. Säger ja till en rimlig, sammanfattad affär inom budget efter ett par byten.',
-    tacticFrequency: 'ibland',
+    behaviour: 'Vänlig, positiv och rättvis, men vill ha valuta för pengarna. Avslöjar behov när ni blir tillfrågade. Byter eftergift mot eftergift. Säger ja till en rimlig, sammanfattad affär inom budget efter ett par byten.',
+    tacticFrequency: 'sällan, och alltid på ett vänligt sätt',
   },
   {
     level: 3, name: 'Prispressad', ceiling: 680000, opening: 590000,
